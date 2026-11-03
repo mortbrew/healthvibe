@@ -34,17 +34,104 @@ pub async fn needs_setup(db: &SqlitePool) -> anyhow::Result<bool> {
     Ok(n == 0)
 }
 
-/// Set the admin password, only if no password exists yet.
-pub async fn setup_admin(db: &SqlitePool, pw: &str) -> anyhow::Result<bool> {
+pub const MIN_PASSWORD: usize = 12;
+
+/// Validate a username: 1-32 chars of [a-z0-9._-].
+pub fn valid_username(u: &str) -> bool {
+    (1..=32).contains(&u.len())
+        && u.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
+}
+
+/// First run: the first account (the seeded row, id 1) becomes the admin with
+/// the chosen username and password. Only works while no password exists.
+pub async fn setup_admin(db: &SqlitePool, username: &str, pw: &str) -> anyhow::Result<bool> {
     let h = hash_password(pw)?;
     let r = sqlx::query(
-        "UPDATE users SET password_hash = ? WHERE id = 1 AND NOT EXISTS
-         (SELECT 1 FROM users WHERE password_hash IS NOT NULL)",
+        "UPDATE users SET username = ?, password_hash = ?, is_admin = 1, must_change_password = 0
+         WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM users WHERE password_hash IS NOT NULL)",
     )
+    .bind(username)
     .bind(h)
     .execute(db)
     .await?;
     Ok(r.rows_affected() == 1)
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow, PartialEq)]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub is_admin: bool,
+    pub must_change_password: bool,
+    pub theme_mode: String,
+    pub theme_light: String,
+    pub theme_dark: String,
+}
+
+pub async fn get_user(db: &SqlitePool, id: i64) -> anyhow::Result<Option<User>> {
+    Ok(sqlx::query_as(
+        "SELECT id, username, is_admin, must_change_password, theme_mode, theme_light, theme_dark
+         FROM users WHERE id = ? AND password_hash IS NOT NULL",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?)
+}
+
+pub async fn list_users(db: &SqlitePool) -> anyhow::Result<Vec<User>> {
+    Ok(sqlx::query_as(
+        "SELECT id, username, is_admin, must_change_password, theme_mode, theme_light, theme_dark
+         FROM users WHERE password_hash IS NOT NULL ORDER BY id",
+    )
+    .fetch_all(db)
+    .await?)
+}
+
+/// Admin creates a user with a temporary password; they must change it on
+/// first login. Returns None if the username is taken.
+pub async fn create_user(
+    db: &SqlitePool,
+    username: &str,
+    temp_pw: &str,
+    is_admin: bool,
+) -> anyhow::Result<Option<i64>> {
+    let h = hash_password(temp_pw)?;
+    let r = sqlx::query(
+        "INSERT OR IGNORE INTO users (username, password_hash, is_admin, must_change_password)
+         VALUES (?, ?, ?, 1)",
+    )
+    .bind(username)
+    .bind(h)
+    .bind(is_admin)
+    .execute(db)
+    .await?;
+    Ok((r.rows_affected() == 1).then(|| r.last_insert_rowid()))
+}
+
+/// Change a password after checking the current one. Clears the
+/// must-change flag. The new password must differ from the current one.
+pub async fn change_password(
+    db: &SqlitePool,
+    user_id: i64,
+    current: &str,
+    new: &str,
+) -> anyhow::Result<bool> {
+    let h: Option<String> = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(db)
+        .await?
+        .flatten();
+    match h {
+        Some(h) if verify_password(current, &h) && current != new => {}
+        _ => return Ok(false),
+    }
+    sqlx::query("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?")
+        .bind(hash_password(new)?)
+        .bind(user_id)
+        .execute(db)
+        .await?;
+    Ok(true)
 }
 
 /// Returns the user id when username/password match.
@@ -102,13 +189,52 @@ mod tests {
     async fn setup_login_session() {
         let db = crate::db::open_memory().await.unwrap();
         assert!(needs_setup(&db).await.unwrap());
-        assert!(setup_admin(&db, "correct horse").await.unwrap());
-        assert!(!setup_admin(&db, "again").await.unwrap(), "setup only once");
+        assert!(setup_admin(&db, "admin", "correct horse").await.unwrap());
+        assert!(
+            !setup_admin(&db, "x", "again again again").await.unwrap(),
+            "setup only once"
+        );
         assert_eq!(login(&db, "admin", "wrong").await.unwrap(), None);
         let uid = login(&db, "admin", "correct horse").await.unwrap().unwrap();
         let tok = create_session(&db, uid).await.unwrap();
         assert_eq!(session_user(&db, &tok).await.unwrap(), Some(1));
         delete_session(&db, &tok).await.unwrap();
         assert_eq!(session_user(&db, &tok).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn temp_password_must_change() {
+        let db = crate::db::open_memory().await.unwrap();
+        setup_admin(&db, "toby", "admin password!").await.unwrap();
+        let id = create_user(&db, "sam", "temporary-pass", false)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(create_user(&db, "sam", "x", false).await.unwrap().is_none());
+        assert!(
+            get_user(&db, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .must_change_password
+        );
+        assert!(!change_password(&db, id, "wrong", "new password 1")
+            .await
+            .unwrap());
+        assert!(
+            !change_password(&db, id, "temporary-pass", "temporary-pass")
+                .await
+                .unwrap()
+        );
+        assert!(change_password(&db, id, "temporary-pass", "new password 1")
+            .await
+            .unwrap());
+        assert!(
+            !get_user(&db, id)
+                .await
+                .unwrap()
+                .unwrap()
+                .must_change_password
+        );
     }
 }

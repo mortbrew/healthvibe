@@ -12,6 +12,8 @@ pub struct Config {
     pub staging_dir: PathBuf,
     /// Allow session cookies without the `Secure` flag (plain-HTTP testing only).
     pub allow_http: bool,
+    /// Directory with the built web app (default `/web`).
+    pub web_dir: PathBuf,
 }
 
 impl Config {
@@ -27,6 +29,7 @@ impl Config {
                     .as_str(),
                 "1" | "true" | "yes"
             ),
+            web_dir: get("HEALTHVIBE_WEB_DIR", "/web").into(),
         }
     }
 

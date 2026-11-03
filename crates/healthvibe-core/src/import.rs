@@ -21,6 +21,8 @@ pub struct Row {
     pub start_utc: String,
     pub end_utc: String,
     pub tz_offset: Option<String>,
+    pub local_start: String,
+    pub local_end: String,
     pub source: Option<String>,
     pub hash: String,
 }
@@ -34,7 +36,8 @@ pub struct TypeCount {
 pub type Counts = BTreeMap<String, TypeCount>;
 
 /// Apple dates look like `2024-01-02 07:30:00 -0500`.
-fn parse_date(s: &str) -> Option<(String, String)> {
+/// Returns (UTC RFC3339, original offset, local wall-clock time).
+fn parse_date(s: &str) -> Option<(String, String, String)> {
     let dt = chrono::DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S %z").ok()?;
     let off = s.rsplit(' ').next().unwrap_or("").to_string();
     Some((
@@ -42,6 +45,7 @@ fn parse_date(s: &str) -> Option<(String, String)> {
             .format("%Y-%m-%dT%H:%M:%SZ")
             .to_string(),
         off,
+        dt.format("%Y-%m-%d %H:%M:%S").to_string(),
     ))
 }
 
@@ -70,8 +74,8 @@ fn to_row(tag: &[u8], a: &BTreeMap<String, String>) -> Option<Row> {
         ),
         _ => return None,
     };
-    let (start_utc, off) = parse_date(a.get("startDate")?)?;
-    let (end_utc, _) = parse_date(a.get("endDate")?)?;
+    let (start_utc, off, local_start) = parse_date(a.get("startDate")?)?;
+    let (end_utc, _, local_end) = parse_date(a.get("endDate")?)?;
     let source = a.get("sourceName").cloned();
     let key = format!(
         "{kind}\x1f{}\x1f{}\x1f{start_utc}\x1f{end_utc}\x1f{}",
@@ -87,6 +91,8 @@ fn to_row(tag: &[u8], a: &BTreeMap<String, String>) -> Option<Row> {
         start_utc,
         end_utc,
         tz_offset: Some(off),
+        local_start,
+        local_end,
         source,
     })
 }
@@ -148,8 +154,9 @@ async fn insert_batch(
     for r in rows {
         let res = sqlx::query(
             "INSERT OR IGNORE INTO readings
-             (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, hash,
+              local_start, local_end)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(user_id)
         .bind(&r.kind)
@@ -160,6 +167,8 @@ async fn insert_batch(
         .bind(&r.tz_offset)
         .bind(&r.source)
         .bind(&r.hash)
+        .bind(&r.local_start)
+        .bind(&r.local_end)
         .execute(&mut *tx)
         .await?;
         let c = counts.entry(r.kind).or_default();

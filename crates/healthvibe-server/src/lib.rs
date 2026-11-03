@@ -1,10 +1,11 @@
 //! healthvibe-server: the Axum application.
 
-mod web;
+mod api;
 
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use healthvibe_core::config::Config;
 use serde_json::json;
+use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -16,8 +17,14 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .merge(web::routes())
+        .nest("/api/v1", api::routes())
+        .fallback_service(spa(&state.config.web_dir))
         .with_state(state)
+}
+
+/// Serve the built SPA; unknown paths get index.html (client-side routing).
+fn spa(dir: &std::path::Path) -> ServeDir<ServeFile> {
+    ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")))
 }
 
 /// Liveness: the process is up.
