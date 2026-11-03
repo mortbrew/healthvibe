@@ -50,9 +50,15 @@ Each row is one `Find Health Samples` block in the master Shortcut. **Key** is t
 | 44 | Other | HKCategoryTypeIdentifierMindfulSession | mindfulSession | Mindful minutes | session | category | when used | off | Mind |
 | 45 | Other | HKQuantityTypeIdentifierDietaryWater | dietaryWater | Water | mL | quantity | manual / app | off | Nutrition |
 | 46 | Other | HKQuantityTypeIdentifierDietaryCaffeine | dietaryCaffeine | Caffeine | mg | quantity | manual / app | off | Nutrition |
+| 47 | Workouts | HKWorkoutType (HKWorkout, all HKWorkoutActivityType values) | workouts | Workouts (type, duration, energy, distance, avg/max HR) | s, kcal, km, count/min | workout | per workout | on | Activity, Heart |
+| 48 | Workouts | HKQuantityTypeIdentifierRunningPower | runningPower | Running power | W | quantity | during runs (Watch) | off | Activity |
+| 49 | Workouts | HKQuantityTypeIdentifierRunningSpeed | runningSpeed | Running speed | km/hr | quantity | during runs | off | Activity |
+| 50 | Workouts | HKQuantityTypeIdentifierRunningStrideLength | runningStrideLength | Running stride length | m | quantity | during runs | off | Activity |
+| 51 | Workouts | HKQuantityTypeIdentifierRunningVerticalOscillation | runningVerticalOscillation | Vertical oscillation | cm | quantity | during runs | off | Activity |
+| 52 | Workouts | HKQuantityTypeIdentifierRunningGroundContactTime | runningGroundContactTime | Ground contact time | ms | quantity | during runs | off | Activity |
 
 Notes
 - Category values are sent as strings, e.g. `sleepAnalysis`: `inBed`, `awake`, `asleepCore`, `asleepDeep`, `asleepREM`, `asleepUnspecified`; `appleStandHour`: `stood`, `idle`.
-- Workouts (`HKWorkoutType`) and State of Mind are not in this list; see open questions in [shortcut-design.md](shortcut-design.md).
+- Workouts are in v1: read with the Shortcut's "Find Workouts" action and sent in the upload's `workouts` array (design doc §4); `type` uses the HKWorkoutActivityType name in camelCase (e.g. `running`, `traditionalStrengthTraining`). State of Mind is not included.
 - Whether each identifier appears in the Shortcuts "Find Health Samples" type picker must be verified on iOS 26 when building the master Shortcut; anything missing is import-only (export.xml).
 - Apple's Sleep Score is not available (see design doc §8); healthvibe computes its own from `sleepAnalysis`.
