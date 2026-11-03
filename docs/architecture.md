@@ -111,7 +111,6 @@ assets/               # signed .shortcut
 
 ## Open questions for Toby
 
-
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
 3. **Frontend framework:** Svelte (SvelteKit static adapter or Vite + Svelte) or React (Vite + React)? See the comparison above; Toby wants to discuss.
