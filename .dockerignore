@@ -3,3 +3,5 @@ appdata/
 .env
 .git/
 *.zip
+web/node_modules/
+web/dist/
