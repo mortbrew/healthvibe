@@ -1,6 +1,6 @@
 # Running healthvibe behind a reverse proxy
 
-healthvibe is **proxy-agnostic**: it speaks plain HTTP on one port inside its container and expects any reverse proxy (Caddy, Traefik, Nginx Proxy Manager, Pangolin, nginx, HAProxy, Cloudflare Tunnel…) to terminate TLS in front of it. Nothing in the app depends on a specific proxy. This guide is also linked from the admin step of the setup wizard (see [Setup check](#setup-wizard-check)). See also [architecture.md](architecture.md).
+healthvibe is **proxy-agnostic**: it speaks plain HTTP on one port inside its container and expects any reverse proxy (Caddy, Traefik, Nginx Proxy Manager, nginx, HAProxy, Cloudflare Tunnel…) to terminate TLS in front of it. Nothing in the app depends on a specific proxy. This guide is also linked from the admin step of the setup wizard (see [Setup check](#setup-wizard-check)). See also [architecture.md](architecture.md).
 
 ## What healthvibe needs from any proxy
 
@@ -24,7 +24,7 @@ healthvibe is **proxy-agnostic**: it speaks plain HTTP on one port inside its co
 
 ### Path-based routing (restricting the UI, exposing ingest)
 
-You can put the web UI behind SSO (Pangolin auth, Authelia, Authentik, Cloudflare Access…) and still let the iPhone reach the upload endpoints, which are protected by their own bearer token:
+You can put the web UI behind SSO (Authelia, Authentik, Cloudflare Access…) and still let the iPhone reach the upload endpoints, which are protected by their own bearer token:
 
 | Path | Who calls it | Behind SSO? |
 |---|---|---|
@@ -114,13 +114,6 @@ Traefik sends forwarded headers by default; set its entrypoint `transport.respon
    ```
    NPM already sets `X-Forwarded-For/Proto/Host`.
 4. To protect the UI only (Access Lists or Authelia), add custom locations for `/api/v1/ingest`, `/api/v1/shortcut`, `/shortcut/download` and `/mcp` without the access list.
-
-## Pangolin (example)
-
-1. Create a resource for `health.example.com` pointing at `http://healthvibe:8000` through your site's Newt connector (healthvibe on the same Docker network as Newt; no published ports).
-2. If you enable Pangolin authentication (SSO) on the resource, add **bypass rules** (path rules set to allow) for `/api/v1/ingest`, `/api/v1/shortcut/*`, `/shortcut/download/*` and `/mcp*` so the iPhone and AI clients reach them with their bearer tokens.
-3. Pangolin terminates TLS and forwards `X-Forwarded-*`; set `HEALTHVIBE_TRUSTED_PROXIES` to the Docker network range Newt connects from.
-4. Check the body size and timeout limits in your Pangolin/Traefik config if large uploads fail.
 
 ## Setup wizard check
 
