@@ -149,6 +149,7 @@ Synthetic data doesn't cover what real exports contain: enum quirks, duplicate/o
 ## Open tasks
 
 - **Real export.xml fixture:** Toby provides his export (kept local, gitignored); build `hv-cli sanitize-export`; Toby reviews `tests/fixtures/export-sample.xml` before it's committed. See [Importer test fixtures](#importer-test-fixtures-real-exportxml).
+- **Calibrate the sleep score formula:** Toby provides screenshots of Apple's Sleep Score from his iPhone as ground truth. Compare them against healthvibe's calculated score across 15–25 different nights and iteratively adjust the formula (likely a weighted blend of duration, stage percentages, consistency/bedtime regularity, and interruptions) to match Apple as closely as possible. The current weights (duration 50 / bedtime 30 / interruptions 20, [shortcut-design §8](shortcut-design.md#8-sleep-score)) are only a starting point. Screenshots and real sleep data are never committed to this public repo: keep them local and gitignored (e.g. `tests/fixtures/private/`); if anything is recorded, only anonymized nightly score pairs (Apple vs. healthvibe), after Toby's review.
 
 ## Open questions for Toby
 

@@ -263,7 +263,7 @@ healthvibe computes its own score from `sleepAnalysis` stage samples, using Appl
 | Bedtime | 30 | sleep onset vs. user's 14-day median onset: full within ±30 min, linear to 0 at ±2.5 h |
 | Interruptions | 20 | awake segments ≥ 2 min after onset: 0 → 20, each one −4, also −1 per 5 min awake |
 
-The v1 formula is **fixed** (not user-tunable; only the sleep goal is a user setting). The dashboard labels it "healthvibe sleep score", shows the breakdown, and documents that it will not exactly match the Watch.
+The v1 formula is **fixed** (not user-tunable; only the sleep goal is a user setting). The dashboard labels it "healthvibe sleep score", shows the breakdown, and documents that it will not exactly match the Watch. These weights are a starting point; they will be calibrated against Apple's displayed score over 15–25 nights (see [architecture.md → Open tasks](architecture.md#open-tasks)).
 
 ## 9. Signing a Shortcut without a Mac — findings
 
