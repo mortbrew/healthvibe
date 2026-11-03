@@ -1,0 +1,20 @@
+Vendored browser assets
+=======================
+
+healthvibe vendors these files so opening the dashboard does not contact a
+CDN. That matters for a page that will show health data.
+
+Apache ECharts 6.1.0
+  License: Apache-2.0 (see echarts.LICENSE)
+  File: echarts.min.js
+  Source: https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js
+          (published npm package for the Apache ECharts 6.1.0 release)
+  sha256: b66b25aeb4df84e33199dc21694014d336d222cbd9deb0e5a7c14bd6aa0d0fd0
+
+htmx 2.0.11
+  License: Zero-Clause BSD (see htmx.LICENSE)
+  File: htmx.min.js
+  Source: https://github.com/bigskysoftware/htmx/releases/download/v2.0.11/htmx.min.js
+  sha256: d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717
+  sha384: 2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg
+          (matches the integrity pin published with htmx 2.0.11)

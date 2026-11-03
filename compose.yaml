@@ -1,0 +1,40 @@
+# healthvibe is reached through a Pangolin/Newt tunnel. No host ports are published.
+# This file creates network healthvibe_tunnel. Attach Newt to that network and
+# target http://healthvibe:8000. To join a network that already exists, set
+# `external: true` and change `name` below.
+
+name: healthvibe
+
+services:
+  healthvibe:
+    build: .
+    image: healthvibe:local
+    user: "1000:1000"
+    env_file:
+      - .env
+    volumes:
+      - ./appdata:/data
+    networks:
+      - tunnel
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, urllib.request; port = os.environ.get('HEALTHVIBE_PORT', '8000'); urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=4)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+networks:
+  tunnel:
+    name: healthvibe_tunnel
