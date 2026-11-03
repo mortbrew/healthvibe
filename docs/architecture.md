@@ -65,7 +65,7 @@ assets/               # signed .shortcut
 
 ## One binary, several routes
 
-`healthvibe` serves the built SPA, the JSON API (`/api/v1/*`), the Shortcut endpoints (`/api/v1/shortcut/*`, `/api/v1/ingest`), the MCP server (`/mcp`), and background jobs (stale-upload alerts, theme catalog refresh) from one process. Token scopes keep them apart: an `upload` token can only read its own Shortcut config and write readings; an `mcp` token can only read; sessions are for the web UI. (Open question 1 below.)
+`healthvibe` serves the built SPA, the JSON API (`/api/v1/*`), the Shortcut endpoints (`/api/v1/shortcut/*`, `/api/v1/ingest/*`), the MCP server (`/mcp`), and background jobs (stale-upload alerts, theme catalog refresh) from one process. Token scopes keep them apart: an `upload` token can only read its own Shortcut config and write readings; an `mcp` token can only read; sessions are for the web UI. (Open question 1 below.)
 
 ## Testing and CI
 
@@ -74,9 +74,9 @@ assets/               # signed .shortcut
 - `SQLX_OFFLINE=true` in CI using the committed `.sqlx/` query data.
 - Tests prove per-user isolation (one user can never read another's data) and idempotent imports.
 
-## Deployment (Serenity)
+## Deployment
 
-- Docker Compose, container runs as `1000:1000`, **no published LAN ports** (Newt/Pangolin reaches `http://healthvibe:8000` on the internal network), data in `./appdata` (SQLite DB, per-user themes), secrets in `.env` (session key, SMTP, optional GitHub token for the theme catalog, optional `APPRISE_API_URL`).
+- Docker Compose, container runs as `1000:1000`, **proxy-agnostic**: by default publishes **no ports** and joins an external proxy network the user configures (`HEALTHVIBE_PROXY_NETWORK`), with an option to bind `127.0.0.1:PORT` instead; any reverse proxy terminates TLS (see [reverse-proxy.md](reverse-proxy.md)), data in `./appdata` (SQLite DB, per-user themes), secrets in `.env` (session key, SMTP, optional GitHub token for the theme catalog, optional `APPRISE_API_URL`).
 - Multi-stage Dockerfile:
   ```dockerfile
   FROM node:22-alpine AS web
@@ -103,6 +103,26 @@ assets/               # signed .shortcut
   Three stages: node builds the SPA, rust builds the static musl binary, the final image holds the binary plus static assets (embedded via `rust-embed`, or `COPY --from=web /web/dist /static` and served with `ServeDir`). Expected image ~20–30 MB.
 - Healthcheck: `/healthvibe healthcheck` subcommand (distroless has no curl); log rotation in Compose.
 
+## Public URL and proxies
+
+- `HEALTHVIBE_PUBLIC_URL` (e.g. `https://health.example.com`): canonical base for QR codes, the Shortcut config, emails and MCP client instructions.
+- `HEALTHVIBE_TRUSTED_PROXIES` (CIDR list): `X-Forwarded-For/Proto/Host` are honored only from these peers; otherwise ignored.
+- MCP is exposed at `<public URL>/mcp` through whatever proxy is used; nothing in the app assumes a specific proxy.
+- The admin setup step checks scheme, host and forwarded headers and warns if something is off ([reverse-proxy.md](reverse-proxy.md#setup-wizard-check)).
+
+## Per-user upload URL (open)
+
+Every user gets their own unique upload URL. Options:
+
+| Option | QR code 2 | Token reset | Rate limiting | Proxy logs |
+|---|---|---|---|---|
+| **(a) Opaque per-user ID in the path + bearer token** — `/api/v1/ingest/u/<random-id>` with `Authorization: Bearer …` (**recommended**) | Carries server + claim code; claim returns the ID and token | New token, same ID (Shortcut keeps its URL); ID can also be rotated | Per ID before auth (cheap rejection), per token after | Only the ID appears; the token stays in a header |
+| (b) Token itself in the path — `/api/v1/ingest/<token>` | Simplest Shortcut (one URL, no header) | Reset changes the URL; Shortcut must re-claim | Per path = per user | **Token leaks** into proxy/access logs, browser history, screenshots |
+| (c) Per-user subdomains — `<user>.health.example.com` | Different host per user | Unaffected | Per host | Clean, but needs **wildcard DNS and TLS**: heavy for self-hosters |
+| (d) ID generated at setup, embedded in QR code 2 (`healthvibe://setup?server=…&id=…&code=…`) | ID in the QR; claim code returns the token | Same as (a) if combined with a token | As (a) | As (a); the ID in the QR is not a secret on its own |
+
+(a) and (d) combine well: the ID is created when the user enables the Shortcut and returned by the claim (or in QR 2); the bearer token stays the secret. Toby decides.
+
 ## History and superseded work
 
 - Linux Admin Bot's earlier receiver in `/workspace/health` on the shared box is a **Python receiver built for Health Auto Export**. It is a reference only (Compose conventions, store-raw-then-parse, token checks); none of its code is used.
@@ -117,3 +137,4 @@ assets/               # signed .shortcut
 
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
+3. **Per-user upload URL:** which option (see [Per-user upload URL](#per-user-upload-url-open))? Recommended: (a) opaque ID in the path + bearer token, optionally with the ID delivered via QR code 2 (d).

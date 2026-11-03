@@ -12,3 +12,4 @@ Status: early development.
 - [Build the Shortcut yourself](docs/shortcut-build.md)
 - [Supported metrics](docs/metrics.md)
 - [Theming](docs/theming.md)
+- [Reverse proxy guide](docs/reverse-proxy.md)

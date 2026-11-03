@@ -59,7 +59,7 @@ sequenceDiagram
             S->>S: skip (never read)
         end
     end
-    S->>W: POST /api/v1/ingest (batched JSON)
+    S->>W: POST /api/v1/ingest/u/<id> (batched JSON)
     W->>W: validate, reject non-enabled, dedupe, store
     W-->>S: {accepted, duplicates, rejected, next_since}
     S->>U: Notification per user setting (Always / Only on errors)
@@ -69,6 +69,8 @@ sequenceDiagram
 ## 2a. Onboarding (Setup page)
 
 The Setup page is a wizard; each step unlocks the next.
+
+0. **Admin only, first run: proxy check.** Shows the scheme/host/client IP healthvibe was reached on and warns if it isn't HTTPS, forwarded headers are missing, the proxy isn't trusted or the host doesn't match `HEALTHVIBE_PUBLIC_URL`. Links to [reverse-proxy.md](reverse-proxy.md). QR codes use `HEALTHVIBE_PUBLIC_URL`.
 
 1. **Choose what to sync (required).** Metric checkboxes (presets: Recommended / Everything / custom, see [metrics.md](metrics.md)) and the trigger (§6a). No QR code is shown until both are saved.
 2. **QR code 1: install the Shortcut.** Links to `https://<server>/shortcut/download/<token>` where `<token>` is a short-lived (15 min) HMAC-signed URL bound to the user; a logged-in session also works. The server returns the signed `healthvibe.shortcut` bundled in the release/Docker image (`assets/shortcut/healthvibe-<version>.shortcut`, embedded in the binary or copied into the image), with `Content-Type: application/octet-stream` and a filename so iOS offers to import it. No GitHub or iCloud needed. **Alternative for every user:** build the Shortcut yourself from the block-by-block guide and, if you have a Mac, sign it yourself (`shortcuts sign`), then transfer it to the iPhone and continue with QR code 2 — see [Build and sign it yourself](shortcut-build.md#build-and-sign-it-yourself-mac). The wizard shows this option next to QR code 1.
@@ -124,7 +126,7 @@ There is no endpoint for the Shortcut to change settings. Metrics, trigger and n
 ### 3.4 `POST /api/v1/shortcut/claim`
 Body `{"setup_code": "…", "device_name": "…", "shortcut_version": "0.1.0"}` → `{"upload_token": "hvu_…", "config": {…same as 3.2…}}`. **One device per user:** each user has a single upload token; claiming a new setup code revokes the previous token (moving to a new phone = scan a new QR). Setup code: 128-bit random, 10-minute TTL, single use, hashed at rest, rate-limited per IP.
 
-## 4. Upload JSON schema — `POST /api/v1/ingest`
+## 4. Upload JSON schema — `POST /api/v1/ingest/u/<id>`
 
 ```json
 {
@@ -283,7 +285,7 @@ Decision: the friend-signed `.shortcut` file is bundled in each release and Dock
 - QR code 2 holds only URL + one-time setup code (~10 min, single use, replaced on every page load). Screenshots of an old QR are useless.
 - QR code 1 is a short-lived signed download URL (15 min) or requires login; the file holds no secrets anyway.
 - Settings can only be changed in the web UI (logged-in session + CSRF); the upload token cannot change settings.
-- HTTPS only (via Pangolin). Server refuses plain HTTP in production config.
+- HTTPS only, terminated by whatever reverse proxy the admin uses ([reverse-proxy.md](reverse-proxy.md)); forwarded headers trusted only from `HEALTHVIBE_TRUSTED_PROXIES`. Server refuses plain HTTP in production config. If the UI is behind SSO, the ingest/config/claim/download paths must bypass it (bearer token protects them).
 - Server enforces enabled metrics and per-user isolation; ingest can only write to the token's user.
 - Rate limits on claim, config and ingest; request size cap (`max_request_bytes`).
 - The signed Shortcut contains **no** secrets or server URLs; it's identical for every user. `hv-config.json` in iCloud Drive holds the token — documented, and users can revoke if the phone or iCloud account is lost.
@@ -322,3 +324,4 @@ Decision: the friend-signed `.shortcut` file is bundled in each release and Dock
 
 1. **Sleep Focus trigger:** Toby will test on a real iPhone whether "Focus → Sleep → When Turning Off" can run without asking. If not, replace it with "Sleep → Waking Up".
 2. **Stack questions** (receiver in the main binary or separate; close PR #1 and redo the scaffold in Rust): see [architecture.md](architecture.md#open-questions-for-toby).
+3. **Per-user upload URL** (`/api/v1/ingest/u/<id>` + bearer token is the working assumption here): see [architecture.md](architecture.md#per-user-upload-url-open).
