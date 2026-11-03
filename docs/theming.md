@@ -6,7 +6,7 @@ healthvibe's whole look comes from a small set of CSS custom properties ("theme 
 
 ## Decisions
 
-- **Language: Rust (resolved).** The theme store is a Rust crate, `hv-themes`, in the healthvibe workspace and is called **in-process** by the Axum app (the whole project is Rust, so the earlier helper-binary/subprocess plan is no longer needed).
+- **Language: Rust (resolved).** The theme store is a Rust crate, `hv-themes`, in the healthvibe workspace and is called **in-process** by the Axum API (the theme browser UI lives in the SPA) (the whole project is Rust, so the earlier helper-binary/subprocess plan is no longer needed).
 - **No DIY theme maker or custom CSS upload at launch.** Coding Team Lead's earlier PR13 (custom theme upload) is **deferred**.
 - Downloaded themes are parsed as **color values only**.
 
@@ -30,7 +30,7 @@ Settings → Appearance:
 - **Mode toggle (three-way):** Light · Dark · Follow system. Follow system uses `prefers-color-scheme` (CSS media query, no JS needed), so the page flips when the OS does.
 - **Palette pickers:** one inside each mode — the user picks a **light palette** and a **dark palette**. Follow system uses whichever matches.
 - **Installed tab:** built-ins plus the user's downloads, each with a live preview card (surface, text, ring and chart swatches). Actions: **Use for Light**, **Use for Dark**, **Delete** (built-ins can't be deleted).
-- **Search tab:** the full catalog, filtered as you type (HTMX request with a short debounce, server-side substring/fuzzy match on name). Filter chips: source (iTerm2 / Omarchy), "looks light" / "looks dark" (by background luminance). Action: **Download** (then Use).
+- **Search tab:** the full catalog, filtered as you type (the SPA filters the cached catalog from `GET /api/v1/themes/catalog` in the browser, no round trip per keystroke). Filter chips: source (iTerm2 / Omarchy), "looks light" / "looks dark" (by background luminance). Action: **Download** (then Use).
 - Downloads are saved per user in `./appdata/themes/<user_id>/<slug>.toml`. Deleting a theme that's in use falls back to the built-in default for that mode.
 
 ## Mapping a scheme onto healthvibe's theme settings
@@ -53,7 +53,7 @@ Input: 16 ANSI colors (normal + bright black, red, green, yellow, blue, magenta,
 
 Contrast uses the WCAG 2.x relative-luminance formula and `mix(a, b, t)` linear RGB interpolation, exactly like VibeKit's `luminance`, `contrast` and `mix`. A scheme with no background/foreground or missing core colors is rejected ("not a usable color scheme"). Mode hints: a palette is "light" if background luminance > 0.5; the picker shows all palettes but sorts matching ones first.
 
-Output is a typed `ThemeSettings` struct, rendered into a `<style>` block of `--name: #rrggbb;` lines (hex validated and re-formatted by the server). ECharts reads the same variables via `getComputedStyle` when it initializes and when the mode changes.
+Output is a typed `ThemeSettings` struct returned as JSON (`GET /api/v1/themes/settings`, hex values validated and re-formatted by the server). The SPA sets them as CSS variables with `style.setProperty('--name', value)` (never by injecting CSS text). Charts read the same variables via `getComputedStyle` when it initializes and when the mode changes.
 
 ## Security
 
