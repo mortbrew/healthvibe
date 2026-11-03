@@ -319,7 +319,7 @@ Every entry records the **provider and model** that produced it, plus timestamps
 - **Write-back:** after a run, new insights, correlations and conclusions are merged in. Contradicted entries are marked `superseded_by`, not deleted.
 - **Compaction:** when the file grows past a budget, older or superseded entries are folded into `summary` (an LLM or rule-based pass), so injected context stays within the model's window.
 
-**Loss and backups:** a lost key means lost keys and lost memory. There are no backups in v1 (as decided), and the UI and docs warn about this.
+**Loss and backups:** a lost key means lost keys and lost memory. Phase-one [backups](#backup-and-disaster-recovery-phase-one) include `memory.enc` and `keys.enc` (still encrypted); without backups, or without the password/token to unwrap them, the data is gone. The UI and docs warn about this.
 
 ### Encryption of keys and insight memory (resolved)
 
@@ -335,8 +335,36 @@ Every entry records the **provider and model** that produced it, plus timestamps
 - **Each scheduled run:** the scheduler presents the token. The server verifies it against the hash, unwraps the DEK **in memory for that run only**, and **zeroizes** it afterwards (`zeroize` crate). Plaintext keys and memory are never written to disk.
 - **Where the token lives:** the scheduler process must hold it. The user provides it into a secrets file or `.env` (e.g. `appdata/secrets/scheduler-<id>.token`, mode 0600), **not the DB**. Caveat: compromise of the host **plus** the token exposes that user's keys and memory.
 - **Password change:** re-wraps the password copy of the DEK. Data is not re-encrypted. **Token rotation:** re-wraps the token copy.
-- **Loss:** a lost password **and** a lost token means the data is lost. Either one alone can still unwrap the DEK. There are no backups in v1.
+- **Loss:** a lost password **and** a lost token means the data is lost. Either one alone can still unwrap the DEK. [Backups](#backup-and-disaster-recovery-phase-one) restore the encrypted files and wrapped DEKs, but not the ability to decrypt them without the password or token.
 - **Superseded:** the earlier "master key in `.env`" option (`HEALTHVIBE_SECRET_KEY`) is dropped.
+
+## Backup and disaster recovery (phase one)
+
+**Model: Tube Archivist.** Its backups cover only the Elasticsearch index, not the media files. They are triggered manually, on a schedule, and after index-changing updates. A "max auto backups to keep" setting rotates them, they are stored in `/cache/backup`, and restore is under *Settings → Actions* ([Actions](https://docs.tubearchivist.com/settings/actions/), [Scheduling](https://docs.tubearchivist.com/settings/scheduling/)). healthvibe's scope is similarly small: the database plus the encrypted per-user files. That makes a built-in backup/restore feasible.
+
+**Creating backups**
+
+- **Scheduled job** (admin-configurable schedule, in the same in-process scheduler) plus a manual **"Back up now"** button.
+- Output: timestamped zips in `./appdata/backups/`, e.g. `healthvibe-backup-YYYYMMDD-HHMMSS-{manual|auto}.zip`, containing:
+  - a **consistent SQLite snapshot** made with `VACUUM INTO` or the online backup API, never a raw copy of the live DB file
+  - every user's `keys.enc` and `memory.enc`
+  - the wrapped data keys (password-wrapped and token-wrapped)
+  - `manifest.json`: app version, schema (migration) version, creation time, kind (manual/auto), and a SHA-256 checksum per file
+- **Rotation:** auto backups are pruned to the **"max auto backups to keep"** setting; manual backups are kept until deleted by hand.
+
+**Restore (web UI, admin only)**
+
+1. Upload a zip, or pick an existing one from `appdata/backups/`.
+2. Validate the manifest, checksums and schema version. Refuse a backup from a newer schema; run migrations after restoring an older one.
+3. Take an automatic **pre-restore backup** of the current state.
+4. Replace the DB and encrypted files, then restart or reload the app.
+
+**Notes**
+
+- **Backups are sensitive.** The SQLite DB is not encrypted, so a zip contains health data (and event/medication data). Restrict file permissions and treat zips like the live data.
+- **Scheduler token files** (`appdata/secrets/…`) stay **out of the zip by default**; whether to offer including them is *to decide*.
+- **Restoring does not bypass encryption.** `keys.enc` and `memory.enc` still need the user's password or scheduler token to unwrap the DEK after restore.
+- **Copy backups off-host.** Backups on the same disk don't protect against disk or host loss; the docs recommend syncing `appdata/backups/` elsewhere.
 
 ## History and superseded work
 
@@ -358,6 +386,7 @@ Every entry records the **provider and model** that produced it, plus timestamps
 - **Scheduled insights:** `insight_schedules` + `insight_runs` tables, in-process scheduler (`tokio-cron-scheduler`), per-run token cap, Insights review page, optional completion notification and "Run now".
 - **Insight memory:** per-user encrypted `memory.enc` + `keys.enc`, versioned JSON schema, relevance-based prompt injection, `get_insight_memory` MCP tool, write-back and compaction. Encryption per [the split-key design](#encryption-of-keys-and-insight-memory-resolved).
 - **Split-key encryption:** per-user DEK, argon2id password wrap, scheduler token (scoped, hashed, revocable/rotatable UI) + token wrap, in-memory unwrap with zeroize, rewrap on password change/rotation; pick XChaCha20-Poly1305 vs `age`; expand the design doc.
+- **Backup and restore (phase one):** scheduled and manual zip backups (SQLite snapshot via `VACUUM INTO`/backup API, encrypted per-user files, wrapped DEKs, manifest with checksums), auto-backup rotation, admin restore UI with validation and pre-restore backup. Decide whether scheduler token files may be included.
 
 ## Open questions for Toby
 
