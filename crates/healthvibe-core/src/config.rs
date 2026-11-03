@@ -1,0 +1,36 @@
+//! Runtime configuration, read from `HEALTHVIBE_*` environment variables.
+
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Address the HTTP server binds to (default `0.0.0.0:8000`).
+    pub bind: String,
+    /// Directory holding `healthvibe.db` (default `/data/db`).
+    pub db_dir: PathBuf,
+    /// Directory for temporary uploads (default `/data/staging`).
+    pub staging_dir: PathBuf,
+    /// Allow session cookies without the `Secure` flag (plain-HTTP testing only).
+    pub allow_http: bool,
+}
+
+impl Config {
+    pub fn from_env() -> Self {
+        let get = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+        Self {
+            bind: get("HEALTHVIBE_BIND", "0.0.0.0:8000"),
+            db_dir: get("HEALTHVIBE_DB_DIR", "/data/db").into(),
+            staging_dir: get("HEALTHVIBE_STAGING_DIR", "/data/staging").into(),
+            allow_http: matches!(
+                get("HEALTHVIBE_ALLOW_HTTP", "false")
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "1" | "true" | "yes"
+            ),
+        }
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.db_dir.join("healthvibe.db")
+    }
+}

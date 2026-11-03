@@ -1,0 +1,19 @@
+[package]
+name = "healthvibe-cli"
+description = "The single `healthvibe` binary: serve, healthcheck, ..."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "healthvibe"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+healthvibe-core.workspace = true
+healthvibe-server.workspace = true
