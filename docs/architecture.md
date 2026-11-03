@@ -74,6 +74,20 @@ assets/               # signed .shortcut
 - `SQLX_OFFLINE=true` in CI using the committed `.sqlx/` query data.
 - Tests prove per-user isolation (one user can never read another's data) and idempotent imports.
 
+### Importer test fixtures (real export.xml)
+
+Synthetic data doesn't cover what real exports contain: enum quirks, duplicate/overlapping timestamps, `InBed` vs stage sleep samples (`AsleepCore/Deep/REM`, `Awake`), odd units (`count/min`, `%`, `kcal` vs `Cal`, `mL/(kg·min)`), metadata keys, device/source strings and the inline DTD. **Toby will provide his real `export.xml`** as a fixture for the streaming quick-xml parser. The repo is **public**, so:
+
+- **The raw file is never committed.** It stays local in `tests/fixtures/private/` (gitignored; CI also fails if anything under that path is tracked). Tests using it are `#[ignore]` or gated on `HEALTHVIBE_REAL_EXPORT=/path/to/export.xml` and run only locally.
+- **Sanitizer:** `hv-cli sanitize-export <in> <out>` produces a small committed fixture, `tests/fixtures/export-sample.xml`, that keeps the structure, record types, units, metadata keys and duplicate/overlap patterns, but:
+  - shifts all dates by one random offset (relative timing preserved),
+  - adds slight noise to values,
+  - replaces device/source names and serials with generic ones (`iPhone`, `Apple Watch`, `Source A`…),
+  - drops `Me` (DOB, sex, blood type), workout GPS routes, ECG and clinical records,
+  - caps the output to a few days.
+- **Toby reviews the sanitized file before it's committed.**
+- Toby may choose to override this plan.
+
 ## Deployment
 
 - Docker Compose, container runs as `1000:1000`, **proxy-agnostic**: by default publishes **no ports** and joins an external proxy network the user configures (`HEALTHVIBE_PROXY_NETWORK`), with an option to bind `127.0.0.1:PORT` instead; any reverse proxy terminates TLS (see [reverse-proxy.md](reverse-proxy.md)), data in `./appdata` (SQLite DB, per-user themes), secrets in `.env` (session key, SMTP, optional GitHub token for the theme catalog, optional `APPRISE_API_URL`).
@@ -131,6 +145,10 @@ assets/               # signed .shortcut
 
 - **Frontend framework:** React (Vite + React + TypeScript), Nov 3, 2026.
 - **Ingest URL:** single fixed `POST /api/v1/ingest`, token only in the `Authorization` header, Nov 3, 2026 ([details](#ingest-endpoint-and-upload-tokens-resolved)).
+
+## Open tasks
+
+- **Real export.xml fixture:** Toby provides his export (kept local, gitignored); build `hv-cli sanitize-export`; Toby reviews `tests/fixtures/export-sample.xml` before it's committed. See [Importer test fixtures](#importer-test-fixtures-real-exportxml).
 
 ## Open questions for Toby
 

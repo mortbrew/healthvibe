@@ -248,7 +248,8 @@ Reconciling "store everything, show enabled" with "choose at import time":
 - **Default: Store everything.** Every record is stored (same hash/dedupe). Dashboard and MCP only show enabled metrics; enabling a metric later instantly shows its history.
 - **Option: Only selected metrics.** Import page lists metrics found in the file (first pass counts types while streaming) with checkboxes pre-set to the user's enabled list. Unticked types are skipped during parsing and never stored.
 - Either way, nothing from the file is kept after import except the parsed rows (the raw upload is deleted after a successful parse unless the user asks to keep it).
-- Streaming `quick-xml` reader + batched inserts in transactions; files over 1 GB are fine.
+- Streaming `quick-xml` reader + batched inserts in transactions
+- Tested against Toby's real export (local only, never committed) and a sanitized committed sample; see [architecture.md](architecture.md#importer-test-fixtures-real-exportxml); files over 1 GB are fine.
 
 ## 8. Sleep score
 
