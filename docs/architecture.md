@@ -273,7 +273,7 @@ CREATE TABLE insight_runs (
 **Key supply (updates the BYOK open question):** scheduled runs fire with no user session, so the key must be available server-side when a job fires. **Per-session in-memory keys therefore don't work for scheduled runs**; they would only work for "Run now". Options (**resolved toward option 2**, with option 1 as an optional fallback; see [Provider-neutral insight memory](#provider-neutral-insight-memory)):
 
 1. **Operator `.env` per provider** (e.g. `HEALTHVIBE_OPENAI_API_KEY`): simplest, never in the DB, but shared by all users of the instance.
-2. **Per-user key encrypted at rest** in SQLite, using a master key from `.env` (`HEALTHVIBE_SECRET_KEY`, e.g. AES-GCM/XChaCha20-Poly1305). This is true BYOK per user, but it relaxes the earlier "never persisted in the DB" rule (encrypted only, never in plaintext or the repo). The keys are lost if the master key is lost.
+2. **Per-user key encrypted at rest** (~~master key from `.env`~~ superseded: split-key DEK design, see [Encryption](#encryption-of-keys-and-insight-memory-resolved)). This is true BYOK per user, but it relaxes the earlier "never persisted in the DB" rule (encrypted only, never in plaintext or the repo). The keys are lost if the master key is lost.
 
 ### Provider-neutral insight memory
 
@@ -321,6 +321,23 @@ Every entry records the **provider and model** that produced it, plus timestamps
 
 **Loss and backups:** a lost key means lost keys and lost memory. There are no backups in v1 (as decided), and the UI and docs warn about this.
 
+### Encryption of keys and insight memory (resolved)
+
+**Decision (Toby):** a best-practice split-key design that mirrors Bitwarden's CLI/background auth. *Details to be expanded later.*
+
+- **Data key (DEK):** each user gets a random 256-bit DEK. It encrypts `keys.enc` and `memory.enc`. **Recommended cipher: XChaCha20-Poly1305**, with `age` as an alternative; the final pick is made at implementation.
+- **Interactive unlock:** the DEK is wrapped by a key derived from the user's **password via argon2id** (per-user salt). At login the server unwraps the DEK into memory for the session.
+- **Background unlock (scheduler token):** at setup the user generates a separate, long-lived **scheduler token** once.
+  - **Narrow scope:** it can only run scheduled insights. That means read-only health data plus writing insight results and memory. No settings, no login, no other API.
+  - It is **revocable and rotatable** in the web UI.
+  - A **second wrapped copy of the DEK** is wrapped by a key derived from the token (argon2id/HKDF).
+  - The server stores **only the token's hash** and the token-wrapped DEK, never the token itself.
+- **Each scheduled run:** the scheduler presents the token. The server verifies it against the hash, unwraps the DEK **in memory for that run only**, and **zeroizes** it afterwards (`zeroize` crate). Plaintext keys and memory are never written to disk.
+- **Where the token lives:** the scheduler process must hold it. The user provides it into a secrets file or `.env` (e.g. `appdata/secrets/scheduler-<id>.token`, mode 0600), **not the DB**. Caveat: compromise of the host **plus** the token exposes that user's keys and memory.
+- **Password change:** re-wraps the password copy of the DEK. Data is not re-encrypted. **Token rotation:** re-wraps the token copy.
+- **Loss:** a lost password **and** a lost token means the data is lost. Either one alone can still unwrap the DEK. There are no backups in v1.
+- **Superseded:** the earlier "master key in `.env`" option (`HEALTHVIBE_SECRET_KEY`) is dropped.
+
 ## History and superseded work
 
 - Linux Admin Bot's earlier receiver in `/workspace/health` on the shared box is a **Python receiver built for Health Auto Export**. It is a reference only (Compose conventions, store-raw-then-parse, token checks); none of its code is used.
@@ -339,10 +356,11 @@ Every entry records the **provider and model** that produced it, plus timestamps
 - **Event logging and AI insights:** build the events/event_changes/event_occurrences tables, the web UI for logging, and the read-only MCP tools (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Decide dose-change modelling. Synthetic data only. See [Event logging and AI insights](#event-logging-and-ai-insights).
 - **Multi-LLM insights (BYOK):** implement the `LlmProvider` trait (OpenAI-compatible first, then Anthropic/Gemini adapters), shared tool layer for MCP + in-app insights, opt-in UI and data-sent disclosure, model-quality recommendation. Decide how keys are supplied at run time. Scheduled runs need a server-side key: operator `.env` per provider vs. per-user key encrypted at rest (see [Scheduled insights](#scheduled-insights-background-runs)). See [Multi-LLM support](#multi-llm-support-bring-your-own-key).
 - **Scheduled insights:** `insight_schedules` + `insight_runs` tables, in-process scheduler (`tokio-cron-scheduler`), per-run token cap, Insights review page, optional completion notification and "Run now".
-- **Insight memory:** per-user encrypted `memory.enc` + `keys.enc`, versioned JSON schema, relevance-based prompt injection, `get_insight_memory` MCP tool, write-back and compaction. Resolve the encryption open question first.
+- **Insight memory:** per-user encrypted `memory.enc` + `keys.enc`, versioned JSON schema, relevance-based prompt injection, `get_insight_memory` MCP tool, write-back and compaction. Encryption per [the split-key design](#encryption-of-keys-and-insight-memory-resolved).
+- **Split-key encryption:** per-user DEK, argon2id password wrap, scheduler token (scoped, hashed, revocable/rotatable UI) + token wrap, in-memory unwrap with zeroize, rewrap on password change/rotation; pick XChaCha20-Poly1305 vs `age`; expand the design doc.
 
 ## Open questions for Toby
 
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
-3. **Encryption for keys and insight memory:** cipher (e.g. XChaCha20-Poly1305, or `age`), and where the key comes from: (a) master key in `.env`, ideally envelope encryption with a per-user data key wrapped by the master key; or (b) a user-derived key via argon2 from the password. Tradeoff: (b) can't decrypt during scheduled background runs when no user is signed in. Mitigations: use (a), or cache a wrapped data key server-side after login (weakens (b)'s guarantee). Either way, a lost key means lost data; no backups in v1.
+3. ~~**Encryption for keys and insight memory**~~ **Resolved:** split-key DEK (password-wrapped + scheduler-token-wrapped). See [Encryption](#encryption-of-keys-and-insight-memory-resolved).
