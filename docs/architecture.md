@@ -117,6 +117,10 @@ Synthetic data doesn't cover what real exports contain: enum quirks, duplicate/o
   Three stages: node builds the SPA, rust builds the static musl binary, the final image holds the binary plus static assets (embedded via `rust-embed`, or `COPY --from=web /web/dist /static` and served with `ServeDir`). Expected image ~20–30 MB.
 - Healthcheck: `/healthvibe healthcheck` subcommand (distroless has no curl); log rotation in Compose.
 
+## Historical backfill
+
+A second signed **backfill Shortcut** walks history backwards in server-assigned windows (default 1 month, adaptive). It uses the same `POST /api/v1/ingest` and Bearer token with a `backfill` flag, skips windows already covered by export.xml, and alerts when complete. The main Shortcut then fetches only missing data from the last 30 days. See [shortcut-design §11a](shortcut-design.md#11a-historical-backfill-shortcut).
+
 ## Public URL and proxies
 
 - `HEALTHVIBE_PUBLIC_URL` (e.g. `https://health.example.com`): canonical base for QR codes, the Shortcut config, emails and MCP client instructions.
@@ -387,6 +391,7 @@ Every entry records the **provider and model** that produced it, plus timestamps
 - **Insight memory:** per-user encrypted `memory.enc` + `keys.enc`, versioned JSON schema, relevance-based prompt injection, `get_insight_memory` MCP tool, write-back and compaction. Encryption per [the split-key design](#encryption-of-keys-and-insight-memory-resolved).
 - **Split-key encryption:** per-user DEK, argon2id password wrap, scheduler token (scoped, hashed, revocable/rotatable UI) + token wrap, in-memory unwrap with zeroize, rewrap on password change/rotation; pick XChaCha20-Poly1305 vs `age`; expand the design doc.
 - **Backup and restore (phase one):** scheduled and manual zip backups (SQLite snapshot via `VACUUM INTO`/backup API, encrypted per-user files, wrapped DEKs, manifest with checksums), auto-backup rotation, admin restore UI with validation and pre-restore backup. Decide whether scheduler token files may be included.
+- **Historical backfill Shortcut:** build and sign the second Shortcut; server-side window state per user (adaptive halving/growth, per-metric floors), `backfill` flag on ingest, completion detection + alert, progress UI, skip export.xml-covered ranges; change the main Shortcut to missing-data-only for the last 30 days. See [shortcut-design §11a](shortcut-design.md#11a-historical-backfill-shortcut).
 
 ## Open questions for Toby
 

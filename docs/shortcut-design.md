@@ -303,6 +303,30 @@ Decision: the friend-signed `.shortcut` file is bundled in each release and Dock
 - **Health permissions** are prompted per type on first run; with ~40 types the first run shows a long permission sheet. Users can deny types they don't want.
 - **No anchored queries** → deletions/edits in Health aren't synced (§5).
 
+## 11a. Historical backfill Shortcut
+
+**Decision (Toby):** a **second, separate signed Shortcut** ("healthvibe Backfill") fetches history without export.xml, or alongside it. The main daily Shortcut stays small.
+
+**How it works**
+
+1. Every run, the Shortcut fetches its config from the server (as in §3). For backfill, the config includes a **scan window**: default **1 month**, starting just before the main Shortcut's 30-day range.
+2. The Shortcut queries Health for that window only and uploads to the same `POST /api/v1/ingest`, with the same Bearer upload token and `"backfill": true` plus the window bounds.
+3. After each successful upload the server automatically moves the window **one more chunk back**. It may take days, but no single run ever does too much.
+4. **Completion:** the server marks the backfill complete when it reaches the start of the user's data. That means either several consecutive empty windows (e.g. 3) or an earliest date the user set. It then sends an alert (web banner plus the existing email/ntfy/apprise channels) and tells the user the backfill Shortcut **can be deleted**.
+
+**Main daily Shortcut change:** it now fetches only **missing data from the last 30 days**. The server's config says which days or metrics are missing, and ingest dedupes everything else (§5).
+
+**Additions**
+
+- **Adaptive window:** if a run times out, fails, or its upload is too large, the server **halves** the window for the next run. The floor is e.g. 1 week, or 1 day for dense metrics like heart rate. The window grows back toward 1 month after consecutive successes. Window size can differ per metric group.
+- **Granularity:** per-reading data wherever feasible, since Toby wants every reading stored. Daily or hourly totals are a fallback only for dense metrics where per-reading data is too heavy for Shortcuts. Stored aggregates are flagged so a later export.xml import can replace them with raw readings.
+- **Idempotent:** re-running a window is safe, because ingest dedupes on `(type, start, end, source)`. A failed run just retries the same window.
+- **Progress in the web UI:** the current window, the oldest date reached, the percent done (against the earliest date if known, otherwise an estimate), the last run, and the last error.
+- **Phone must be unlocked:** Health data is only readable while the iPhone is unlocked (§11), so backfill runs happen while it is unlocked. Suggested triggers: a second personal automation (e.g. a time of day the phone is usually in use, or connecting to a charger while unlocked), or manual runs. The setup page shows the same caveats as §6a.
+- **With export.xml (§7):** windows already covered by an import are **skipped**. The server knows the imported date ranges per metric and only hands out windows with gaps. If the import covers everything, backfill is marked complete immediately.
+
+**Why chunks (research):** Shortcuts loops over raw Health samples get slow and fail. Grouping by day is fast ([iWader: improving performance querying Apple Health samples in Shortcuts](https://www.iwader.co.uk/posts/2023/11/improve-performance-when-querying-apple-health-samples-in-shortcuts/)). Health Auto Export likewise recommends short date ranges and batching for large manual exports ([Health Auto Export: manual export](https://help.healthyapps.dev/en/health-auto-export/manual-export)).
+
 ## 12. Resolved decisions (Nov 3, 2026)
 
 - **Sync settings:** web UI only; must be chosen before any QR code is shown; the Shortcut has no metric or trigger menus (§2a, §3.3).
