@@ -202,6 +202,32 @@ Every tool is scoped to the token's user and stays read-only. Events are created
 
 Medication and supplement data is sensitive health data. It stays in the local SQLite database, is never sent anywhere by healthvibe, and appears in MCP results only for the token's own user. Tests use synthetic events only; no real event or medication data is ever committed to the public repo.
 
+### Multi-LLM support (bring your own key)
+
+Insights can use almost any LLM: Gemini, Grok, ChatGPT/OpenAI, Claude, or any OpenAI-compatible endpoint, including local Ollama.
+
+- **Bring your own key.** healthvibe ships no keys and never provides them. Keys must **not** be persisted in the database or the repo. *Open question:* a server-side call still needs the key somewhere at run time. Options include per-session in memory only (entered in the UI and dropped at logout or restart), or operator-supplied via `.env` for single-user or trusted installs.
+- **Model quality.** The app warns against very small models, including small Ollama models. It recommends a minimum tier: large context window, reliable tool calling, and strong reasoning. This stays a *recommendation* shown in the UI and docs, not a hard-coded list of model names that would go stale.
+- **Provider abstraction.** A thin Rust trait keeps each provider small to add:
+
+```rust
+#[async_trait]
+pub trait LlmProvider: Send + Sync {
+    fn id(&self) -> &str;                       // "openai", "anthropic", "gemini", "xai", "openai-compatible"
+    async fn chat(&self, req: ChatRequest) -> Result<ChatResponse>; // messages + tool definitions
+    fn supports_tools(&self) -> bool;
+}
+```
+
+  `ChatRequest` carries messages and tool schemas; `ChatResponse` returns text and/or tool calls. Most providers map onto one OpenAI-compatible implementation, plus native adapters where needed (Anthropic, Gemini).
+
+**How the read-only MCP server fits — two paths**
+
+1. **External MCP clients** (e.g. Grok Bot, Claude Desktop) connect directly to `<public URL>/mcp` with the user's `mcp` token. healthvibe makes no LLM call; the client's own model does the reasoning.
+2. **In-app insights.** healthvibe's backend calls the user's chosen provider and gives it the **same read-only tools** (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Both paths share one tool implementation in `hv-core`, so behaviour and user scoping are identical. Only the aggregated or needed results of tool calls are sent, never a bulk dump of raw readings.
+
+**Privacy:** with a cloud provider, the health and medication data in tool results **leaves the server**. In-app insights are off by default. The user must explicitly opt in per provider, and the UI says what is sent and where. A local Ollama endpoint keeps the data on the user's own network.
+
 ## History and superseded work
 
 - Linux Admin Bot's earlier receiver in `/workspace/health` on the shared box is a **Python receiver built for Health Auto Export**. It is a reference only (Compose conventions, store-raw-then-parse, token checks); none of its code is used.
@@ -218,6 +244,7 @@ Medication and supplement data is sensitive health data. It stays in the local S
 - **Real export.xml fixture:** Toby provides his export (kept local, gitignored); build `hv-cli sanitize-export`; Toby reviews `tests/fixtures/export-sample.xml` before it's committed. See [Importer test fixtures](#importer-test-fixtures-real-exportxml).
 - **Calibrate the sleep score formula:** Toby provides screenshots of Apple's Sleep Score from his iPhone as ground truth. Compare them against healthvibe's calculated score across 15–25 different nights and iteratively adjust the formula (likely a weighted blend of duration, stage percentages, consistency/bedtime regularity, and interruptions) to match Apple as closely as possible. The current weights (duration 50 / bedtime 30 / interruptions 20, [shortcut-design §8](shortcut-design.md#8-sleep-score)) are only a starting point. Screenshots and real sleep data are never committed to this public repo: keep them local and gitignored (e.g. `tests/fixtures/private/`); if anything is recorded, only anonymized nightly score pairs (Apple vs. healthvibe), after Toby's review.
 - **Event logging and AI insights:** build the events/event_changes/event_occurrences tables, the web UI for logging, and the read-only MCP tools (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Decide dose-change modelling. Synthetic data only. See [Event logging and AI insights](#event-logging-and-ai-insights).
+- **Multi-LLM insights (BYOK):** implement the `LlmProvider` trait (OpenAI-compatible first, then Anthropic/Gemini adapters), shared tool layer for MCP + in-app insights, opt-in UI and data-sent disclosure, model-quality recommendation. Decide how keys are supplied at run time (never persisted). See [Multi-LLM support](#multi-llm-support-bring-your-own-key).
 
 ## Open questions for Toby
 
