@@ -12,7 +12,7 @@ healthvibe is a self-hosted, multi-user Apple Health dashboard (FastAPI, SQLite,
 | Shape | One master Shortcut with a `Find Health Samples` block for every supported metric ([metrics.md](metrics.md)), each gated on whether that metric is enabled. |
 | Metric choice | Lives in both places; **the web app wins**. The Shortcut GETs the enabled list on every run. A first-run Choose Menu lets the user pick on the phone, and that choice is synced up to the server. The server rejects metrics that aren't enabled. |
 | Onboarding | The web app shows a QR code holding the server URL and a one-time setup code; the Shortcut exchanges it for a per-user upload token stored on the phone. |
-| Trigger | Personal automation "Alarm is stopped", set to **Run Immediately**. Health data can only be read while the phone is unlocked. |
+| Trigger | User picks one on first run (§6a); default "Alarm is stopped", **Run Immediately**. Health data can only be read while the phone is unlocked. |
 | export.xml | Default: store everything, show only enabled metrics. Option at import time: import only selected metrics (§7). |
 | Sleep score | Apple's score isn't readable; healthvibe computes its own (§8). |
 
@@ -148,6 +148,37 @@ Rules:
 - **Gaps.** If the user skipped days (phone off, alarm not used), `since` is older than `max_lookback_days`; the Shortcut caps at that and the web app shows "gap: import export.xml or run the Shortcut manually with backfill".
 - **Edits/deletions in Health** are not detected (Shortcuts has no anchored query). Known limitation; a fresh export.xml import fixes it.
 
+## 6a. Choosing a trigger on first run
+
+Shortcuts can't create automations itself, so after QR setup and metric choice the Shortcut asks how it should run, saves the answer, and walks the user through creating the automation.
+
+1. **Choose Menu** "How should healthvibe run each day?" (choices below).
+2. Saves `trigger` in `hv-config.json` and sends it with `PUT /api/v1/shortcut/trigger {"trigger": "alarm_stopped", "detail": "Wake-up alarm"}`. The server keeps it in the user's config (web app shows it and uses it for the stale-upload warning). Unlike metrics, the phone's choice is kept here because only the phone knows which automation exists.
+3. Shows a **Quick Look/Show Result** text with step-by-step instructions for that trigger (below).
+4. **Opens the Automation tab** with `Open URLs` → `shortcuts://automations` (or `shortcuts://create-automation` to jump straight to the new-automation sheet). Neither is in Apple's documented URL-scheme list ([Apple: Shortcuts URL schemes](https://support.apple.com/guide/shortcuts/apda283236d7/ios)), but both are reported working by users and developers ([Stack Overflow](https://stackoverflow.com/questions/69969746/how-to-deep-link-to-automation-in-shortcut-app), [r/shortcuts](https://www.reddit.com/r/shortcuts/comments/1fdkqaj/shortcuts_automation_url_scheme/)). Test on iOS 26/27; if it fails, fall back to plain `shortcuts://` and the instructions say "tap Automation".
+
+| Menu option | Trigger in Shortcuts | Run without asking? | Notes |
+|---|---|---|---|
+| When I stop my alarm (recommended) | Alarm → Is Stopped → Wake-up / Any | **Yes** (Alarm is on Apple's list) | Phone is usually being unlocked, so Health reads work. |
+| At a set time | Time of Day → time, Daily | **Yes** | Fails silently if the phone is locked at that time; next run catches up. |
+| When I arrive home | Arrive → Home location | **Yes** (Arrive on list) | Location permission needed; phone may be locked → catch-up. |
+| When I plug in the charger | Charger → Is Connected | **Yes** (Charger on list) | Often fires while locked at night → mostly catch-up runs; pair with another trigger. |
+| When Sleep Focus turns off | Focus → Sleep → When Turning Off | **Unverified.** Apple's list names "Do Not Disturb", not every Focus. Alternative with confirmed support: **Sleep → Waking Up** (needs a Health sleep schedule). | Recommend offering "Waking up (sleep schedule)" in place of / alongside this. |
+| Manual only | none | n/a | User runs it from the widget, Siri ("healthvibe"), or the Action button. |
+
+Sources for supported triggers and the run-without-asking list: [Apple: Add automations](https://support.apple.com/guide/shortcuts/add-automations-apdfbdbd7123/ios) (lists Time of Day, Alarm, Sleep, Arrive, Leave, CarPlay, …, Do Not Disturb, Low Power Mode, Battery Level, Charger as runnable automatically), [Apple: Setting triggers](https://support.apple.com/guide/shortcuts/setting-triggers-apde31e9638b/ios) (Focus When Turning On/Off, Charger Is Connected/Disconnected), [What's new in Shortcuts 26](https://support.apple.com/en-us/125148) (Alarm "When my alarm is stopped").
+
+Instruction text template (alarm example):
+1. Tap **+** (New Automation) in the Automation tab.
+2. Choose **Alarm** → **Is Stopped** → **Wake-Up** (or Any).
+3. Choose **Run Immediately** (on iOS 27: turn **Confirm Before Run** off) and turn off **Notify When Run** if you like.
+4. Tap **Next** → pick the **healthvibe** shortcut → **Done**.
+5. Tomorrow, check the web app's Status card for "last upload".
+
+The Choose Menu, Ask for Input and Show Result steps only run on first run / when `hv-config.json` lacks a trigger; automated runs never hit an interactive step (those would block Run Immediately). Re-run setup any time with the Shortcut's "Settings" option (shown when run manually).
+
+**Catch-up and stale warnings.** Every run uploads everything since the last successful upload (§5), so missed days catch up automatically (capped at `max_lookback_days`). The server records `last_upload_at` per device; the web app shows a banner and dashboard Status card when no upload arrived for longer than expected for the chosen trigger (default: 36 h for daily triggers, off for Manual), e.g. "No upload from Toby's iPhone since Sun 7:02 AM — check the automation".
+
 ## 6. Versioning and Shortcut updates
 
 - The Shortcut has a `HV_VERSION` text action at the top (semver, matches the GitHub release tag) and sends it in every request.
@@ -225,4 +256,6 @@ Recommendation: friend's Mac per release, plus an **iCloud link** published alon
 5. Notification after each run: always, only on error, or never?
 6. Is publishing an iCloud link alongside the signed file OK (it points to Toby's iCloud account)?
 7. Sleep score weights and goal — accept the v1 formula above, or make all of it user-tunable?
-8. Workouts (`HKWorkout`) aren't a "Find Health Samples" type in the same way — include in v1 or later?
+8. Sleep Focus trigger: confirm on a real iPhone whether "Focus → Sleep → When Turning Off" can Run Immediately; if not, replace it with "Sleep → Waking Up".
+9. Stale-upload threshold: 36 h default OK? Also email/push alerts, or banner only?
+10. Workouts (`HKWorkout`) aren't a "Find Health Samples" type in the same way — include in v1 or later?
