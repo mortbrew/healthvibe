@@ -144,7 +144,7 @@ async fn start_session(st: &AppState, id: i64) -> ApiResult<Response> {
 }
 
 async fn setup(State(st): State<AppState>, Json(c): Json<Credentials>) -> ApiResult<Response> {
-    let username = c.username.trim().to_lowercase();
+    let username = auth::normalize_username(&c.username);
     if !auth::valid_username(&username) {
         return Err(bad("invalid_username"));
     }
@@ -158,7 +158,7 @@ async fn setup(State(st): State<AppState>, Json(c): Json<Credentials>) -> ApiRes
 }
 
 async fn login(State(st): State<AppState>, Json(c): Json<Credentials>) -> ApiResult<Response> {
-    match auth::login(&st.db, c.username.trim(), &c.password).await? {
+    match auth::login(&st.db, &auth::normalize_username(&c.username), &c.password).await? {
         Some(id) => start_session(&st, id).await,
         None => Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials")),
     }
@@ -249,7 +249,7 @@ async fn create_user(
     Json(n): Json<NewUser>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     admin(&u)?;
-    let username = n.username.trim().to_lowercase();
+    let username = auth::normalize_username(&n.username);
     if !auth::valid_username(&username) {
         return Err(bad("invalid_username"));
     }

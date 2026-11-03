@@ -45,11 +45,11 @@ export function Setup({ onDone }: { onDone: (u: User) => void }) {
       submit="Create admin account"
       onSubmit={async (d) => {
         if (s(d, "password") !== s(d, "confirm")) throw new Error("mismatch");
-        const r = await api("/setup", { method: "POST", body: { username: s(d, "username"), password: s(d, "password") } });
+        const r = await api("/setup", { method: "POST", body: { username: s(d, "username").trim().toLowerCase(), password: s(d, "password") } });
         onDone(r.user);
       }}
     >
-      <label>Username<input name="username" autoComplete="username" required /></label>
+      <label>Username or email<input name="username" type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={254} pattern="[A-Za-z0-9@.+_\-]+" title="Letters, digits and @ . + - _ (an email address works)" autoComplete="username" required /></label>
       <label>Password <small className="muted">(12+ characters)</small>
         <input name="password" type="password" autoComplete="new-password" minLength={12} required />
       </label>
@@ -64,11 +64,11 @@ export function Login({ onDone }: { onDone: (u: User) => void }) {
       title="Sign in"
       submit="Sign in"
       onSubmit={async (d) => {
-        const r = await api("/login", { method: "POST", body: { username: s(d, "username"), password: s(d, "password") } });
+        const r = await api("/login", { method: "POST", body: { username: s(d, "username").trim().toLowerCase(), password: s(d, "password") } });
         onDone(r.user);
       }}
     >
-      <label>Username<input name="username" autoComplete="username" required autoFocus /></label>
+      <label>Username or email<input name="username" type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={254} pattern="[A-Za-z0-9@.+_\-]+" title="Letters, digits and @ . + - _ (an email address works)" autoComplete="username" required autoFocus /></label>
       <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
     </Form>
   );

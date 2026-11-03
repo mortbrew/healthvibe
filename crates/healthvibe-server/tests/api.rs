@@ -321,3 +321,95 @@ async fn form_posts_are_rejected() {
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
+
+#[tokio::test]
+async fn usernames_can_be_email_addresses() {
+    let (app, _) = app().await;
+    let p = |u: &str, pw: &str| json!({"username": u, "password": pw});
+    // First-run setup with a mixed-case email: stored trimmed and lowercased.
+    let (s, v, admin) = call(
+        &app,
+        "POST",
+        "/api/v1/setup",
+        None,
+        Some(p("  Toby.Moon+HV@Example.com ", "admin password 1")),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["user"]["username"], "toby.moon+hv@example.com");
+    let admin = admin.unwrap();
+    // Login matches case-insensitively.
+    for u in [
+        "toby.moon+hv@example.com",
+        "TOBY.MOON+HV@EXAMPLE.COM",
+        " Toby.Moon+hv@example.COM",
+    ] {
+        let (s, _, c) = call(
+            &app,
+            "POST",
+            "/api/v1/login",
+            None,
+            Some(p(u, "admin password 1")),
+        )
+        .await;
+        assert_eq!(s, 200, "{u}");
+        assert!(c.is_some());
+    }
+    // Admin creates an email user; a different-case duplicate is refused.
+    let new = |u: &str| json!({"username": u, "temporary_password": "temporary pass"});
+    let (s, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/users",
+        Some(&admin),
+        Some(new("Sam_O-Neil@mail.example.org")),
+    )
+    .await;
+    assert_eq!(s, 201, "{v}");
+    let (s, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/users",
+        Some(&admin),
+        Some(new("SAM_O-NEIL@MAIL.EXAMPLE.ORG")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let (s, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/login",
+        None,
+        Some(p("Sam_O-Neil@Mail.Example.org", "temporary pass")),
+    )
+    .await;
+    assert_eq!(s, 200);
+    // 254 characters is the limit; bad characters and double '@' are rejected.
+    let max = format!("{}@example.com", "a".repeat(242));
+    let (s, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/users",
+        Some(&admin),
+        Some(new(&max)),
+    )
+    .await;
+    assert_eq!(s, 201);
+    for bad in [
+        format!("{max}x"),
+        "a@b@c.com".into(),
+        "with space@example.com".into(),
+        "semi;colon".into(),
+    ] {
+        let (s, v, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/users",
+            Some(&admin),
+            Some(new(&bad)),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(v["error"], "invalid_username");
+    }
+}

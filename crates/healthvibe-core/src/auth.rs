@@ -36,11 +36,27 @@ pub async fn needs_setup(db: &SqlitePool) -> anyhow::Result<bool> {
 
 pub const MIN_PASSWORD: usize = 12;
 
-/// Validate a username: 1-32 chars of [a-z0-9._-].
+/// Longest username accepted: the maximum length of an email address.
+pub const MAX_USERNAME: usize = 254;
+
+/// Usernames are matched case-insensitively: trim and lowercase before
+/// validating, storing or looking one up.
+pub fn normalize_username(u: &str) -> String {
+    u.trim().to_lowercase()
+}
+
+/// Validate a normalized username: 1-254 chars of [a-z0-9@.+_-], so plain
+/// names ("toby") and email addresses ("toby.moon+hv@example.com") both work.
+/// If there is an '@' there must be exactly one, with text on both sides.
 pub fn valid_username(u: &str) -> bool {
-    (1..=32).contains(&u.len())
-        && u.chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
+    let ok_chars = u
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "@.+_-".contains(c));
+    let at_ok = match u.split_once('@') {
+        None => true,
+        Some((local, domain)) => !local.is_empty() && !domain.is_empty() && !domain.contains('@'),
+    };
+    (1..=MAX_USERNAME).contains(&u.len()) && ok_chars && at_ok
 }
 
 /// First run: the first account (the seeded row, id 1) becomes the admin with
@@ -137,8 +153,8 @@ pub async fn change_password(
 /// Returns the user id when username/password match.
 pub async fn login(db: &SqlitePool, user: &str, pw: &str) -> anyhow::Result<Option<i64>> {
     let row: Option<(i64, Option<String>)> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE username = ?")
-            .bind(user)
+        sqlx::query_as("SELECT id, password_hash FROM users WHERE lower(username) = ?")
+            .bind(normalize_username(user))
             .fetch_optional(db)
             .await?;
     Ok(match row {
@@ -184,6 +200,38 @@ pub async fn delete_session(db: &SqlitePool, token: &str) -> anyhow::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usernames_accept_emails() {
+        for ok in [
+            "toby",
+            "t.moon_1-x",
+            "toby@example.com",
+            "toby.moon+hv@mail.example.co.uk",
+        ] {
+            assert!(valid_username(ok), "{ok}");
+        }
+        let long = format!("{}@example.com", "a".repeat(MAX_USERNAME - 12));
+        assert_eq!(long.len(), MAX_USERNAME);
+        assert!(valid_username(&long));
+        for bad in [
+            "",
+            "Toby",
+            "to by",
+            "a@b@c",
+            "@example.com",
+            "toby@",
+            "tö",
+            "x;y",
+            &format!("{long}x"),
+        ] {
+            assert!(!valid_username(bad), "{bad}");
+        }
+        assert_eq!(
+            normalize_username("  Toby.Moon@Example.COM \n"),
+            "toby.moon@example.com"
+        );
+    }
 
     #[tokio::test]
     async fn setup_login_session() {

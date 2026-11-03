@@ -27,7 +27,7 @@ export default function Admin() {
           const form = e.currentTarget;
           setErr(null);
           try {
-            const username = String(d.get("username"));
+            const username = String(d.get("username")).trim().toLowerCase();
             await api("/admin/users", {
               method: "POST",
               body: { username, temporary_password: pw, is_admin: d.get("admin") === "on" },
@@ -44,7 +44,7 @@ export default function Admin() {
         <h2>Add a person</h2>
         <p className="muted">They sign in with the temporary password and must choose their own before they can see anything.</p>
         <div className="row wrap">
-          <label>Username<input name="username" required /></label>
+          <label>Username or email<input name="username" type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={254} pattern="[A-Za-z0-9@.+_\-]+" title="Letters, digits and @ . + - _ (an email address works)" autoComplete="off" required /></label>
           <label>Temporary password<input value={pw} onChange={(e) => setPw(e.target.value)} minLength={12} required /></label>
           <label className="check"><input type="checkbox" name="admin" /> Admin</label>
           <button className="primary">Create user</button>
@@ -59,7 +59,7 @@ export default function Admin() {
       <section className="card">
         <h2>People</h2>
         <table>
-          <thead><tr><th>Username</th><th>Role</th><th>Status</th></tr></thead>
+          <thead><tr><th>Username or email</th><th>Role</th><th>Status</th></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>

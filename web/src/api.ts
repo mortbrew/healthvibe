@@ -35,10 +35,10 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
 }
 
 export const messages: Record<string, string> = {
-  invalid_credentials: "Wrong username or password.",
+  invalid_credentials: "Wrong username/email or password.",
   password_too_short: "Passwords need at least 12 characters.",
-  invalid_username: "Usernames use lowercase letters, digits, dots, dashes or underscores (max 32).",
-  username_taken: "That username is already taken.",
+  invalid_username: "Use a username or email address: letters, digits and @ . + - _ only (max 254 characters).",
+  username_taken: "That username or email is already taken.",
   wrong_password_or_unchanged: "Current password is wrong, or the new one is the same as the old one.",
   already_set_up: "This server is already set up. Sign in instead.",
   upload_failed: "The upload failed. Try again.",
