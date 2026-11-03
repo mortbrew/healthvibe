@@ -270,7 +270,7 @@ CREATE TABLE insight_runs (
 - **Results:** stored in `insight_runs` and listed in an "Insights" page in the web UI for later review.
 - **Notification:** optional per schedule, sent through the existing missed-upload alert channels (email / ntfy / apprise).
 
-**Key supply (updates the BYOK open question):** scheduled runs fire with no user session, so the key must be available server-side when a job fires. **Per-session in-memory keys therefore don't work for scheduled runs**; they would only work for "Run now". Options:
+**Key supply (updates the BYOK open question):** scheduled runs fire with no user session, so the key must be available server-side when a job fires. **Per-session in-memory keys therefore don't work for scheduled runs**; they would only work for "Run now". Options (**resolved toward option 2**, with option 1 as an optional fallback; see [Provider-neutral insight memory](#provider-neutral-insight-memory)):
 
 1. **Operator `.env` per provider** (e.g. `HEALTHVIBE_OPENAI_API_KEY`): simplest, never in the DB, but shared by all users of the instance.
 2. **Per-user key encrypted at rest** in SQLite, using a master key from `.env` (`HEALTHVIBE_SECRET_KEY`, e.g. AES-GCM/XChaCha20-Poly1305). This is true BYOK per user, but it relaxes the earlier "never persisted in the DB" rule (encrypted only, never in plaintext or the repo). The keys are lost if the master key is lost.
@@ -345,4 +345,4 @@ Every entry records the **provider and model** that produced it, plus timestamps
 
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
-- **Encryption for keys and insight memory:** cipher (e.g. XChaCha20-Poly1305, or `age`), and where the key comes from: (a) master key in `.env`, ideally envelope encryption with a per-user data key wrapped by the master key; or (b) a user-derived key via argon2 from the password. Tradeoff: (b) can't decrypt during scheduled background runs when no user is signed in. Mitigations: use (a), or cache a wrapped data key server-side after login (weakens (b)'s guarantee). Either way, a lost key means lost data; no backups in v1.
+3. **Encryption for keys and insight memory:** cipher (e.g. XChaCha20-Poly1305, or `age`), and where the key comes from: (a) master key in `.env`, ideally envelope encryption with a per-user data key wrapped by the master key; or (b) a user-derived key via argon2 from the password. Tradeoff: (b) can't decrypt during scheduled background runs when no user is signed in. Mitigations: use (a), or cache a wrapped data key server-side after login (weakens (b)'s guarantee). Either way, a lost key means lost data; no backups in v1.
