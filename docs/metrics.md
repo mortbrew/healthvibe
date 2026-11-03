@@ -1,5 +1,7 @@
 # Supported metrics (draft for review)
 
+See also: [architecture.md](architecture.md).
+
 Each row is one `Find Health Samples` block in the master Shortcut. **Key** is the identifier used by the API (HealthKit identifier without the `HKQuantityTypeIdentifier` / `HKCategoryTypeIdentifier` prefix). "Default" = enabled for new users. Frequency is typical for iPhone + Apple Watch.
 
 | # | Area | HealthKit identifier | Key | Friendly name | Unit | Type | How often | Default | Dashboard card |

@@ -1,8 +1,10 @@
 # healthvibe iPhone Shortcut — design
 
+See also: [architecture.md](architecture.md) (Rust stack) and [theming.md](theming.md).
+
 Status: **draft for review**. No code yet; coding is paused until this design is settled.
 
-healthvibe is a self-hosted, multi-user Apple Health dashboard (FastAPI, SQLite, HTMX). Apple Health data only leaves the phone through (a) a one-off `export.xml` from the Health app, or (b) something running on the phone. For daily updates we ship one **master Shortcut** that reads only the metrics each user has enabled and POSTs them to that user's healthvibe server.
+healthvibe is a self-hosted, multi-user Apple Health dashboard (Rust: Axum, SQLite via sqlx, server-rendered HTML + HTMX; see [architecture.md](architecture.md)). Apple Health data only leaves the phone through (a) a one-off `export.xml` from the Health app, or (b) something running on the phone. For daily updates we ship one **master Shortcut** that reads only the metrics each user has enabled and POSTs them to that user's healthvibe server.
 
 ## 1. Decisions so far
 
@@ -69,7 +71,7 @@ sequenceDiagram
 The Setup page is a wizard; each step unlocks the next.
 
 1. **Choose what to sync (required).** Metric checkboxes (presets: Recommended / Everything / custom, see [metrics.md](metrics.md)) and the trigger (§6a). No QR code is shown until both are saved.
-2. **QR code 1: install the Shortcut.** Links to `https://<server>/shortcut/download/<token>` where `<token>` is a short-lived (15 min) HMAC-signed URL bound to the user; a logged-in session also works. The server returns the signed `healthvibe.shortcut` bundled in the release/Docker image (`app/static/shortcut/healthvibe-<version>.shortcut`), with `Content-Type: application/octet-stream` and a filename so iOS offers to import it. No GitHub or iCloud needed. **Alternative for every user:** build the Shortcut yourself from the block-by-block guide and, if you have a Mac, sign it yourself (`shortcuts sign`), then transfer it to the iPhone and continue with QR code 2 — see [Build and sign it yourself](shortcut-build.md#build-and-sign-it-yourself-mac). The wizard shows this option next to QR code 1.
+2. **QR code 1: install the Shortcut.** Links to `https://<server>/shortcut/download/<token>` where `<token>` is a short-lived (15 min) HMAC-signed URL bound to the user; a logged-in session also works. The server returns the signed `healthvibe.shortcut` bundled in the release/Docker image (`assets/shortcut/healthvibe-<version>.shortcut`, embedded in the binary or copied into the image), with `Content-Type: application/octet-stream` and a filename so iOS offers to import it. No GitHub or iCloud needed. **Alternative for every user:** build the Shortcut yourself from the block-by-block guide and, if you have a Mac, sign it yourself (`shortcuts sign`), then transfer it to the iPhone and continue with QR code 2 — see [Build and sign it yourself](shortcut-build.md#build-and-sign-it-yourself-mac). The wizard shows this option next to QR code 1.
 3. **QR code 2: configure.** Encodes `healthvibe://setup?server=https://<server>&code=<setup code>` as plain text (the Shortcut parses it). Setup code: one-time, ~10 min TTL, a **new code is generated each time the page loads** (older unused codes are invalidated). The user runs the Shortcut once by hand; with no `hv-config.json` it opens the camera ("Scan QR/Barcode"), claims the code (§3.4) and saves the token.
 4. **Finish.** The page polls for the first upload, then shows the trigger setup steps for the chosen trigger (§6a) and an "Open Shortcuts automations" button.
 
@@ -212,7 +214,7 @@ Automated runs never hit an interactive step (that would block Run Immediately);
 Stale-upload alerts (36 h default) always show in the web app, plus optional per-user alert channels set on the user's Notifications page:
 - **Email (SMTP):** server admin configures `SMTP_HOST/PORT/USER/PASSWORD/FROM` in `.env`; each user sets their address and turns email on/off.
 - **Push via ntfy:** user enters an ntfy topic URL (ntfy.sh or self-hosted) and optional access token.
-- **Push via Apprise:** user enters one or more Apprise URLs (covers Pushover, Gotify, Telegram, Discord, Matrix, etc.); healthvibe ships the `apprise` library.
+- **Push via Apprise:** user enters one or more Apprise URLs (covers Pushover, Gotify, Telegram, Discord, Matrix, etc.); Apprise is Python, so healthvibe talks to an optional [apprise-api](https://github.com/caronc/apprise-api) sidecar container over HTTP (`APPRISE_API_URL` in `.env`); without it, only ntfy and email are offered.
 - One alert per stale period (re-armed after the next successful upload); a "Send test" button per channel. Run errors reported by the server (e.g. repeated 426/401) use the same channels.
 
 ## 6b. "Help, I messed up my Shortcut" page
@@ -244,7 +246,7 @@ Reconciling "store everything, show enabled" with "choose at import time":
 - **Default: Store everything.** Every record is stored (same hash/dedupe). Dashboard and MCP only show enabled metrics; enabling a metric later instantly shows its history.
 - **Option: Only selected metrics.** Import page lists metrics found in the file (first pass counts types while streaming) with checkboxes pre-set to the user's enabled list. Unticked types are skipped during parsing and never stored.
 - Either way, nothing from the file is kept after import except the parsed rows (the raw upload is deleted after a successful parse unless the user asks to keep it).
-- Streaming `iterparse` + batched inserts; files over 1 GB are fine.
+- Streaming `quick-xml` reader + batched inserts in transactions; files over 1 GB are fine.
 
 ## 8. Sleep score
 
@@ -314,6 +316,9 @@ Decision: the friend-signed `.shortcut` file is bundled in each release and Dock
 - **Lookback:** 7 days on first run, 30-day max (§3.2).
 - **Metric presets in the web UI:** Recommended / Everything / custom.
 
+- **Stack:** Rust (Axum, sqlx/SQLite, askama + HTMX), see [architecture.md](architecture.md). Theming per [theming.md](theming.md); custom theme upload (PR13) deferred.
+
 ## 13. Open questions
 
 1. **Sleep Focus trigger:** Toby will test on a real iPhone whether "Focus → Sleep → When Turning Off" can run without asking. If not, replace it with "Sleep → Waking Up".
+2. **Stack questions** (receiver in the main binary or separate; close PR #1 and redo the scaffold in Rust): see [architecture.md](architecture.md#open-questions-for-toby).

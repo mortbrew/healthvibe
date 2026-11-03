@@ -1,5 +1,7 @@
 # Build the healthvibe Shortcut yourself
 
+Server side: see [architecture.md](architecture.md).
+
 The signed Shortcut served by your healthvibe server (Setup → QR code 1) is built exactly as described here. Use this guide to **verify** what the installed Shortcut does (open it in Shortcuts and compare action by action) or to **recreate** it on your own iPhone without installing anyone else's file. No Mac needed.
 
 Status: draft. Action names are from the iOS 26 Shortcuts app; verify them when the master Shortcut is built. Screenshots are planned (see [Screenshots](#screenshots)).
