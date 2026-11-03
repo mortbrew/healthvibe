@@ -228,6 +228,53 @@ pub trait LlmProvider: Send + Sync {
 
 **Privacy:** with a cloud provider, the health and medication data in tool results **leaves the server**. In-app insights are off by default. The user must explicitly opt in per provider, and the UI says what is sent and where. A local Ollama endpoint keeps the data on the user's own network.
 
+### Scheduled insights (background runs)
+
+**Decision (Toby):** insights run in the background on a **user-created schedule** (daily, weekly, or custom cron-like), not only on demand. This lets users cap LLM token use. A manual **"Run now"** button is optional.
+
+```sql
+CREATE TABLE insight_schedules (
+  id              INTEGER PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  cron            TEXT NOT NULL,          -- presets "daily"/"weekly" map to cron; custom allowed
+  provider        TEXT NOT NULL,          -- LlmProvider id
+  model           TEXT NOT NULL,
+  scope           TEXT NOT NULL,          -- JSON: metrics/events/date window to analyse
+  max_tokens      INTEGER,                -- optional per-run token cap
+  notify          INTEGER NOT NULL DEFAULT 0,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  last_run        TEXT,
+  next_run        TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE insight_runs (
+  id          INTEGER PRIMARY KEY,
+  schedule_id INTEGER REFERENCES insight_schedules(id) ON DELETE SET NULL, -- NULL = manual run
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  started_at  TEXT NOT NULL,
+  finished_at TEXT,
+  provider    TEXT NOT NULL,
+  model       TEXT NOT NULL,
+  tokens_in   INTEGER,
+  tokens_out  INTEGER,
+  status      TEXT NOT NULL CHECK (status IN ('running','ok','error','capped')),
+  error       TEXT,
+  findings_md TEXT                        -- markdown findings, reviewed in the web UI
+);
+```
+
+- **Scheduler:** in-process in the main binary (e.g. `tokio-cron-scheduler`), loaded from enabled `insight_schedules` at startup and reloaded on edit. Each job runs the same shared tool layer as MCP. If the per-run token cap is hit, the run stops and is saved as `capped`.
+- **Results:** stored in `insight_runs` and listed in an "Insights" page in the web UI for later review.
+- **Notification:** optional per schedule, sent through the existing missed-upload alert channels (email / ntfy / apprise).
+
+**Key supply (updates the BYOK open question):** scheduled runs fire with no user session, so the key must be available server-side when a job fires. **Per-session in-memory keys therefore don't work for scheduled runs**; they would only work for "Run now". Options:
+
+1. **Operator `.env` per provider** (e.g. `HEALTHVIBE_OPENAI_API_KEY`): simplest, never in the DB, but shared by all users of the instance.
+2. **Per-user key encrypted at rest** in SQLite, using a master key from `.env` (`HEALTHVIBE_SECRET_KEY`, e.g. AES-GCM/XChaCha20-Poly1305). This is true BYOK per user, but it relaxes the earlier "never persisted in the DB" rule (encrypted only, never in plaintext or the repo). The keys are lost if the master key is lost.
+
 ## History and superseded work
 
 - Linux Admin Bot's earlier receiver in `/workspace/health` on the shared box is a **Python receiver built for Health Auto Export**. It is a reference only (Compose conventions, store-raw-then-parse, token checks); none of its code is used.
@@ -244,7 +291,8 @@ pub trait LlmProvider: Send + Sync {
 - **Real export.xml fixture:** Toby provides his export (kept local, gitignored); build `hv-cli sanitize-export`; Toby reviews `tests/fixtures/export-sample.xml` before it's committed. See [Importer test fixtures](#importer-test-fixtures-real-exportxml).
 - **Calibrate the sleep score formula:** Toby provides screenshots of Apple's Sleep Score from his iPhone as ground truth. Compare them against healthvibe's calculated score across 15–25 different nights and iteratively adjust the formula (likely a weighted blend of duration, stage percentages, consistency/bedtime regularity, and interruptions) to match Apple as closely as possible. The current weights (duration 50 / bedtime 30 / interruptions 20, [shortcut-design §8](shortcut-design.md#8-sleep-score)) are only a starting point. Screenshots and real sleep data are never committed to this public repo: keep them local and gitignored (e.g. `tests/fixtures/private/`); if anything is recorded, only anonymized nightly score pairs (Apple vs. healthvibe), after Toby's review.
 - **Event logging and AI insights:** build the events/event_changes/event_occurrences tables, the web UI for logging, and the read-only MCP tools (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Decide dose-change modelling. Synthetic data only. See [Event logging and AI insights](#event-logging-and-ai-insights).
-- **Multi-LLM insights (BYOK):** implement the `LlmProvider` trait (OpenAI-compatible first, then Anthropic/Gemini adapters), shared tool layer for MCP + in-app insights, opt-in UI and data-sent disclosure, model-quality recommendation. Decide how keys are supplied at run time (never persisted). See [Multi-LLM support](#multi-llm-support-bring-your-own-key).
+- **Multi-LLM insights (BYOK):** implement the `LlmProvider` trait (OpenAI-compatible first, then Anthropic/Gemini adapters), shared tool layer for MCP + in-app insights, opt-in UI and data-sent disclosure, model-quality recommendation. Decide how keys are supplied at run time. Scheduled runs need a server-side key: operator `.env` per provider vs. per-user key encrypted at rest (see [Scheduled insights](#scheduled-insights-background-runs)). See [Multi-LLM support](#multi-llm-support-bring-your-own-key).
+- **Scheduled insights:** `insight_schedules` + `insight_runs` tables, in-process scheduler (`tokio-cron-scheduler`), per-run token cap, Insights review page, optional completion notification and "Run now".
 
 ## Open questions for Toby
 
