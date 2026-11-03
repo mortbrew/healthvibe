@@ -46,7 +46,7 @@ Category types (e.g. Sleep Analysis, Stand Hour) use the same block; `value` is 
 
 ## Block 5 — Upload
 14. **Dictionary** `{schema: 1, shortcut_version: HV_VERSION, device: Device Name, run_id: (UUID via Text "Current Date" hashed/random number), tz: Current Time Zone, metrics: PAYLOAD_METRICS, workouts: WORKOUTS}`.
-15. **Get Contents of URL** `POST {SERVER}/api/v1/ingest/u/{UPLOAD_ID}` (ID from the claim; final URL scheme is an open question), header `Authorization: Bearer {TOKEN}`, body = JSON (the dictionary). Large runs are split into several requests by metric group (batch index/count).
+15. **Get Contents of URL** `POST {SERVER}/api/v1/ingest` (same fixed URL for every user), header `Authorization: Bearer {TOKEN}` (the token is never put in the URL), body = JSON (the dictionary). Large runs are split into several requests by metric group (batch index/count).
 16. **If** request failed or response has `rejected` entries, **or** `NOTIFY` = `always`: **Show Notification** with `accepted`/`duplicates`/error text.
 
 That's the whole Shortcut. It never shows a menu; the only prompt is the QR scan when no settings file exists.

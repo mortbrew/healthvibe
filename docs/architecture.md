@@ -65,7 +65,7 @@ assets/               # signed .shortcut
 
 ## One binary, several routes
 
-`healthvibe` serves the built SPA, the JSON API (`/api/v1/*`), the Shortcut endpoints (`/api/v1/shortcut/*`, `/api/v1/ingest/*`), the MCP server (`/mcp`), and background jobs (stale-upload alerts, theme catalog refresh) from one process. Token scopes keep them apart: an `upload` token can only read its own Shortcut config and write readings; an `mcp` token can only read; sessions are for the web UI. (Open question 1 below.)
+`healthvibe` serves the built SPA, the JSON API (`/api/v1/*`), the Shortcut endpoints (`/api/v1/shortcut/*`, `POST /api/v1/ingest`), the MCP server (`/mcp`), and background jobs (stale-upload alerts, theme catalog refresh) from one process. Token scopes keep them apart: an `upload` token can only read its own Shortcut config and write readings; an `mcp` token can only read; sessions are for the web UI. (Open question 1 below.)
 
 ## Testing and CI
 
@@ -110,18 +110,16 @@ assets/               # signed .shortcut
 - MCP is exposed at `<public URL>/mcp` through whatever proxy is used; nothing in the app assumes a specific proxy.
 - The admin setup step checks scheme, host and forwarded headers and warns if something is off ([reverse-proxy.md](reverse-proxy.md#setup-wizard-check)).
 
-## Per-user upload URL (open)
+## Ingest endpoint and upload tokens (resolved)
 
-Every user gets their own unique upload URL. Options:
+**Decided (Nov 3, 2026):** one fixed ingest path per deployment, **`POST /api/v1/ingest`**. No per-user subdomains, path IDs or tokens in the path.
 
-| Option | QR code 2 | Token reset | Rate limiting | Proxy logs |
-|---|---|---|---|---|
-| **(a) Opaque per-user ID in the path + bearer token** — `/api/v1/ingest/u/<random-id>` with `Authorization: Bearer …` (**recommended**) | Carries server + claim code; claim returns the ID and token | New token, same ID (Shortcut keeps its URL); ID can also be rotated | Per ID before auth (cheap rejection), per token after | Only the ID appears; the token stays in a header |
-| (b) Token itself in the path — `/api/v1/ingest/<token>` | Simplest Shortcut (one URL, no header) | Reset changes the URL; Shortcut must re-claim | Per path = per user | **Token leaks** into proxy/access logs, browser history, screenshots |
-| (c) Per-user subdomains — `<user>.health.example.com` | Different host per user | Unaffected | Per host | Clean, but needs **wildcard DNS and TLS**: heavy for self-hosters |
-| (d) ID generated at setup, embedded in QR code 2 (`healthvibe://setup?server=…&id=…&code=…`) | ID in the QR; claim code returns the token | Same as (a) if combined with a token | As (a) | As (a); the ID in the QR is not a secret on its own |
-
-(a) and (d) combine well: the ID is created when the user enables the Shortcut and returned by the claim (or in QR 2); the bearer token stays the secret. Toby decides.
+- Each user's secret travels **only** in `Authorization: Bearer <token>`; the server maps the token to the user. This keeps tokens out of access logs, browser history and referrers.
+- Tokens: random 256-bit, format `hvu_<8-char prefix>_<secret>`. The DB stores the prefix (indexed) and a SHA-256 hash of the full token (high-entropy tokens don't need a slow hash). Lookup by prefix, then a **constant-time compare** of the hash (`subtle`); unknown or revoked tokens get the same 401 with no timing difference.
+- The Shortcut sets the header in its one **Get Contents of URL** action.
+- **Rate limiting:** per token and per client IP (from trusted-proxy headers), e.g. with `tower_governor`; failed auth attempts count against the IP.
+- **QR code 2** carries only the public URL and the one-time setup code: `healthvibe://setup?server=<HEALTHVIBE_PUBLIC_URL>&code=<setup code>`. The claim returns the token.
+- **Token reset:** issuing a new token (new claim) revokes the old one; the URL never changes.
 
 ## History and superseded work
 
@@ -132,9 +130,9 @@ Every user gets their own unique upload URL. Options:
 ## Resolved
 
 - **Frontend framework:** React (Vite + React + TypeScript), Nov 3, 2026.
+- **Ingest URL:** single fixed `POST /api/v1/ingest`, token only in the `Authorization` header, Nov 3, 2026 ([details](#ingest-endpoint-and-upload-tokens-resolved)).
 
 ## Open questions for Toby
 
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
-3. **Per-user upload URL:** which option (see [Per-user upload URL](#per-user-upload-url-open))? Recommended: (a) opaque ID in the path + bearer token, optionally with the ID delivered via QR code 2 (d).

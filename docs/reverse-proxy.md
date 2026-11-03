@@ -10,7 +10,7 @@ healthvibe is **proxy-agnostic**: it speaks plain HTTP on one port inside its co
 | **Forwarded headers** | Correct links, QR codes, secure cookies, per-IP rate limits | `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` (or `Forwarded`) |
 | **Trusted proxies** | healthvibe only believes forwarded headers from these addresses | `HEALTHVIBE_TRUSTED_PROXIES=172.16.0.0/12` (CIDRs, comma-separated) |
 | **Public URL** | The canonical URL used in QR codes, emails, the Shortcut config | `HEALTHVIBE_PUBLIC_URL=https://health.example.com` |
-| **Body size** | Shortcut uploads can be several MB | ≥ **50 MB** for `/api/v1/ingest/*` |
+| **Body size** | Shortcut uploads can be several MB | ≥ **50 MB** for `/api/v1/ingest` |
 | **Large imports** | `export.xml` (zipped) can be 100 MB–2 GB | Raise the limit for `/api/v1/import` (e.g. 2 GB) **or** rely on the chunked upload (the SPA uploads in 16 MB chunks, so 50 MB everywhere is enough) |
 | **Timeouts** | Slow phone uploads, long import chunks | read/send timeout ≥ 120 s; no buffering limits that break streaming |
 | **Keep `Authorization`** | Ingest and MCP use `Authorization: Bearer …` | Don't strip or overwrite it (watch out for SSO/forward-auth middleware) |
@@ -28,7 +28,7 @@ You can put the web UI behind SSO (Pangolin auth, Authelia, Authentik, Cloudflar
 
 | Path | Who calls it | Behind SSO? |
 |---|---|---|
-| `/api/v1/ingest/*` | iPhone Shortcut | **No** (bearer token) |
+| `/api/v1/ingest` | iPhone Shortcut | **No** (bearer token) |
 | `/api/v1/shortcut/config`, `/api/v1/shortcut/claim` | iPhone Shortcut | **No** (bearer token / one-time claim code) |
 | `/shortcut/download/*` | iPhone (QR code 1) | No (signed, 15-min URL) |
 | `/mcp` | AI clients | Usually no (bearer `mcp` token) |
@@ -78,7 +78,7 @@ health.example.com {
     }
 }
 ```
-Caddy sets `X-Forwarded-For/Proto/Host` and passes `Authorization` by default. To protect only the UI with forward auth, use a `@ui not path /api/v1/ingest/* /api/v1/shortcut/* /shortcut/download/* /mcp*` matcher on the `forward_auth` block.
+Caddy sets `X-Forwarded-For/Proto/Host` and passes `Authorization` by default. To protect only the UI with forward auth, use a `@ui not path /api/v1/ingest /api/v1/shortcut/* /shortcut/download/* /mcp*` matcher on the `forward_auth` block.
 
 ## Traefik (Docker labels)
 
@@ -118,7 +118,7 @@ Traefik sends forwarded headers by default; set its entrypoint `transport.respon
 ## Pangolin (example)
 
 1. Create a resource for `health.example.com` pointing at `http://healthvibe:8000` through your site's Newt connector (healthvibe on the same Docker network as Newt; no published ports).
-2. If you enable Pangolin authentication (SSO) on the resource, add **bypass rules** (path rules set to allow) for `/api/v1/ingest/*`, `/api/v1/shortcut/*`, `/shortcut/download/*` and `/mcp*` so the iPhone and AI clients reach them with their bearer tokens.
+2. If you enable Pangolin authentication (SSO) on the resource, add **bypass rules** (path rules set to allow) for `/api/v1/ingest`, `/api/v1/shortcut/*`, `/shortcut/download/*` and `/mcp*` so the iPhone and AI clients reach them with their bearer tokens.
 3. Pangolin terminates TLS and forwards `X-Forwarded-*`; set `HEALTHVIBE_TRUSTED_PROXIES` to the Docker network range Newt connects from.
 4. Check the body size and timeout limits in your Pangolin/Traefik config if large uploads fail.
 
