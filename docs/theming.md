@@ -6,7 +6,7 @@ healthvibe's whole look comes from a small set of CSS custom properties ("theme 
 
 ## Decisions
 
-- **Language: Rust (resolved).** The theme store is a Rust crate, `hv-themes`, in the healthvibe workspace and is called **in-process** by the Axum API (the theme browser UI lives in the SPA) (the whole project is Rust, so the earlier helper-binary/subprocess plan is no longer needed).
+- **Language: Rust (resolved).** The theme store is a Rust crate, `healthvibe-themes`, in the healthvibe workspace and is called **in-process** by the Axum API (the theme browser UI lives in the SPA) (the whole project is Rust, so the earlier helper-binary/subprocess plan is no longer needed).
 - **No DIY theme maker or custom CSS upload at launch.** Coding Team Lead's earlier PR13 (custom theme upload) is **deferred**.
 - Downloaded themes are parsed as **color values only**.
 
@@ -62,12 +62,12 @@ Output is a typed `ThemeSettings` struct returned as JSON (`GET /api/v1/themes/s
 - Fetching is server-side, limited to `api.github.com` and `raw.githubusercontent.com` URLs built from the listing (no user-supplied URLs), with timeouts and a size cap.
 - Per-user directories; slugs are validated, so no path traversal.
 
-## Rust implementation plan (`hv-themes` crate)
+## Rust implementation plan (`healthvibe-themes` crate)
 
 VibeKit's theme modules can't be used as a git dependency as-is: `theme.rs` builds `ratatui::style::Color` values and the crate pulls in the TUI. Options, in order of preference:
 
-1. **Upstream a small refactor in vibekit** (separate PR there, with Toby's OK): move the palette parsing, `luminance`/`contrast`/`mix` and the GitHub catalog code into a UI-free module or a `theme-core` crate behind a feature flag (`default-features = false` drops ratatui). Then `hv-themes` depends on it via `git = "https://github.com/mortbrew/vibekit"` pinned to a rev.
-2. Until then (or if that isn't wanted): **vendor a copy** of the relevant functions into `crates/hv-themes/src/vendor/vibekit_theme.rs` with an attribution header (VibeKit, MIT, copyright Toby Moon, source path and commit), using plain `(u8, u8, u8)` instead of ratatui colors.
+1. **Upstream a small refactor in vibekit** (separate PR there, with Toby's OK): move the palette parsing, `luminance`/`contrast`/`mix` and the GitHub catalog code into a UI-free module or a `theme-core` crate behind a feature flag (`default-features = false` drops ratatui). Then `healthvibe-themes` depends on it via `git = "https://github.com/mortbrew/vibekit"` pinned to a rev.
+2. Until then (or if that isn't wanted): **vendor a copy** of the relevant functions into `crates/healthvibe-themes/src/vendor/vibekit_theme.rs` with an attribution header (VibeKit, MIT, copyright Toby Moon, source path and commit), using plain `(u8, u8, u8)` instead of ratatui colors.
 
 Crate API (used in-process by the Axum handlers):
 

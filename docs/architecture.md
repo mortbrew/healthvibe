@@ -56,8 +56,8 @@ The frontend owns the visuals: activity rings, sleep-stage charts, body composit
 Cargo.toml            # workspace
 crates/
   healthvibe/         # the binary: Axum app, JSON API, static SPA serving, MCP, importer
-  hv-core/            # models, sqlx queries, dedupe hashing, sleep score
-  hv-themes/          # theme store + palette → CSS mapping (theming.md)
+  healthvibe-core/            # models, sqlx queries, dedupe hashing, sleep score
+  healthvibe-themes/          # theme store + palette → CSS mapping (theming.md)
 migrations/           # sqlx migrations
 frontend/             # Vite + React + TypeScript; `npm run build` → frontend/dist
 assets/               # signed .shortcut
@@ -79,7 +79,7 @@ assets/               # signed .shortcut
 Synthetic data doesn't cover what real exports contain: enum quirks, duplicate/overlapping timestamps, `InBed` vs stage sleep samples (`AsleepCore/Deep/REM`, `Awake`), odd units (`count/min`, `%`, `kcal` vs `Cal`, `mL/(kg·min)`), metadata keys, device/source strings and the inline DTD. **Toby will provide his real `export.xml`** as a fixture for the streaming quick-xml parser. The repo is **public**, so:
 
 - **The raw file is never committed.** It stays local in `tests/fixtures/private/` (gitignored; CI also fails if anything under that path is tracked). Tests using it are `#[ignore]` or gated on `HEALTHVIBE_REAL_EXPORT=/path/to/export.xml` and run only locally.
-- **Sanitizer:** `hv-cli sanitize-export <in> <out>` produces a small committed fixture, `tests/fixtures/export-sample.xml`, that keeps the structure, record types, units, metadata keys and duplicate/overlap patterns, but:
+- **Sanitizer:** `healthvibe-cli sanitize-export <in> <out>` produces a small committed fixture, `tests/fixtures/export-sample.xml`, that keeps the structure, record types, units, metadata keys and duplicate/overlap patterns, but:
   - shifts all dates by one random offset (relative timing preserved),
   - adds slight noise to values,
   - replaces device/source names and serials with generic ones (`iPhone`, `Apple Watch`, `Source A`…),
@@ -228,7 +228,7 @@ pub trait LlmProvider: Send + Sync {
 **How the read-only MCP server fits — two paths**
 
 1. **External MCP clients** (e.g. Grok Bot, Claude Desktop) connect directly to `<public URL>/mcp` with the user's `mcp` token. healthvibe makes no LLM call; the client's own model does the reasoning.
-2. **In-app insights.** healthvibe's backend calls the user's chosen provider and gives it the **same read-only tools** (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Both paths share one tool implementation in `hv-core`, so behaviour and user scoping are identical. Only the aggregated or needed results of tool calls are sent, never a bulk dump of raw readings.
+2. **In-app insights.** healthvibe's backend calls the user's chosen provider and gives it the **same read-only tools** (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Both paths share one tool implementation in `healthvibe-core`, so behaviour and user scoping are identical. Only the aggregated or needed results of tool calls are sent, never a bulk dump of raw readings.
 
 **Privacy:** with a cloud provider, the health and medication data in tool results **leaves the server**. In-app insights are off by default. The user must explicitly opt in per provider, and the UI says what is sent and where. A local Ollama endpoint keeps the data on the user's own network.
 
@@ -383,7 +383,7 @@ Every entry records the **provider and model** that produced it, plus timestamps
 
 ## Open tasks
 
-- **Real export.xml fixture:** Toby provides his export (kept local, gitignored); build `hv-cli sanitize-export`; Toby reviews `tests/fixtures/export-sample.xml` before it's committed. See [Importer test fixtures](#importer-test-fixtures-real-exportxml).
+- **Real export.xml fixture:** Toby provides his export (kept local, gitignored); build `healthvibe-cli sanitize-export`; Toby reviews `tests/fixtures/export-sample.xml` before it's committed. See [Importer test fixtures](#importer-test-fixtures-real-exportxml).
 - **Calibrate the sleep score formula:** Toby provides screenshots of Apple's Sleep Score from his iPhone as ground truth. Compare them against healthvibe's calculated score across 15–25 different nights and iteratively adjust the formula (likely a weighted blend of duration, stage percentages, consistency/bedtime regularity, and interruptions) to match Apple as closely as possible. The current weights (duration 50 / bedtime 30 / interruptions 20, [shortcut-design §8](shortcut-design.md#8-sleep-score)) are only a starting point. Screenshots and real sleep data are never committed to this public repo: keep them local and gitignored (e.g. `tests/fixtures/private/`); if anything is recorded, only anonymized nightly score pairs (Apple vs. healthvibe), after Toby's review.
 - **Event logging and AI insights:** build the events/event_changes/event_occurrences tables, the web UI for logging, and the read-only MCP tools (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Decide dose-change modelling. Synthetic data only. See [Event logging and AI insights](#event-logging-and-ai-insights).
 - **Multi-LLM insights (BYOK):** implement the `LlmProvider` trait (OpenAI-compatible first, then Anthropic/Gemini adapters), shared tool layer for MCP + in-app insights, opt-in UI and data-sent disclosure, model-quality recommendation. Decide how keys are supplied at run time. Scheduled runs need a server-side key: operator `.env` per provider vs. per-user key encrypted at rest (see [Scheduled insights](#scheduled-insights-background-runs)). See [Multi-LLM support](#multi-llm-support-bring-your-own-key).
