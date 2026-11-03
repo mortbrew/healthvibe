@@ -4,7 +4,7 @@ See also: [architecture.md](architecture.md) (Rust stack) and [theming.md](themi
 
 Status: **draft for review**. No code yet; coding is paused until this design is settled.
 
-healthvibe is a self-hosted, multi-user Apple Health dashboard (Rust: Axum, SQLite via sqlx, SPA frontend (Svelte or React, open) over a JSON API; see [architecture.md](architecture.md)). Apple Health data only leaves the phone through (a) a one-off `export.xml` from the Health app, or (b) something running on the phone. For daily updates we ship one **master Shortcut** that reads only the metrics each user has enabled and POSTs them to that user's healthvibe server.
+healthvibe is a self-hosted, multi-user Apple Health dashboard (Rust: Axum, SQLite via sqlx, React SPA (Vite + TypeScript) over a JSON API; see [architecture.md](architecture.md)). Apple Health data only leaves the phone through (a) a one-off `export.xml` from the Health app, or (b) something running on the phone. For daily updates we ship one **master Shortcut** that reads only the metrics each user has enabled and POSTs them to that user's healthvibe server.
 
 ## 1. Decisions so far
 
@@ -316,7 +316,7 @@ Decision: the friend-signed `.shortcut` file is bundled in each release and Dock
 - **Lookback:** 7 days on first run, 30-day max (§3.2).
 - **Metric presets in the web UI:** Recommended / Everything / custom.
 
-- **Stack:** Rust (Axum, sqlx/SQLite, SPA + JSON API), see [architecture.md](architecture.md). Theming per [theming.md](theming.md); custom theme upload (PR13) deferred.
+- **Stack:** Rust (Axum, sqlx/SQLite, React SPA + JSON API), see [architecture.md](architecture.md). Theming per [theming.md](theming.md); custom theme upload (PR13) deferred.
 
 ## 13. Open questions
 

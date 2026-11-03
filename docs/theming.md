@@ -53,7 +53,7 @@ Input: 16 ANSI colors (normal + bright black, red, green, yellow, blue, magenta,
 
 Contrast uses the WCAG 2.x relative-luminance formula and `mix(a, b, t)` linear RGB interpolation, exactly like VibeKit's `luminance`, `contrast` and `mix`. A scheme with no background/foreground or missing core colors is rejected ("not a usable color scheme"). Mode hints: a palette is "light" if background luminance > 0.5; the picker shows all palettes but sorts matching ones first.
 
-Output is a typed `ThemeSettings` struct returned as JSON (`GET /api/v1/themes/settings`, hex values validated and re-formatted by the server). The SPA sets them as CSS variables with `style.setProperty('--name', value)` (never by injecting CSS text). Charts read the same variables via `getComputedStyle` when it initializes and when the mode changes.
+Output is a typed `ThemeSettings` struct returned as JSON (`GET /api/v1/themes/settings`, hex values validated and re-formatted by the server). The React SPA sets them as CSS variables with `style.setProperty('--name', value)` (never by injecting CSS text). ECharts (via `echarts-for-react`) and the SVG rings read the same variables via `getComputedStyle` when it initializes and when the mode changes.
 
 ## Security
 

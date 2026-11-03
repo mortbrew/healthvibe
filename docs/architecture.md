@@ -7,7 +7,7 @@ Status: **draft for review** (Nov 3, 2026). **Decision: healthvibe is written in
 | Concern | Choice | Alternative considered |
 |---|---|---|
 | Web backend | [Axum](https://github.com/tokio-rs/axum) on Tokio, `tower`/`tower-http` middleware (compression, timeouts, request limits, tracing) | Actix Web |
-| Frontend | **SPA built to static files** (Svelte or React, **choice open**, see [Frontend](#frontend-spa)), served by Axum via `tower-http` `ServeDir` or embedded with `rust-embed`, with an `index.html` fallback for client-side routes | — |
+| Frontend | **SPA built to static files** **Vite + React + TypeScript** (decided, see [Frontend](#frontend-spa)), served by Axum via `tower-http` `ServeDir` or embedded with `rust-embed`, with an `index.html` fallback for client-side routes | — |
 | Charts | Bundled in the SPA (ECharts works with either framework; see comparison). No CDN | — |
 | API | JSON REST, versioned `/api/v1` (see [API](#api)); OpenAPI via `utoipa` (optional) | — |
 | Database | SQLite (WAL) via [sqlx](https://github.com/launchbadge/sqlx): compile-time checked queries (`query!`, offline `.sqlx` data in the repo for CI) and `sqlx migrate` migrations | rusqlite |
@@ -24,23 +24,23 @@ Status: **draft for review** (Nov 3, 2026). **Decision: healthvibe is written in
 
 ## Frontend (SPA)
 
-**Decided:** a single-page app built to static files and served by the Axum backend. **Open:** Svelte or React.
+**Decided (Nov 3, 2026):** **Vite + React + TypeScript**, built to static files and served by the Axum backend.
 
 The frontend owns the visuals: activity rings, sleep-stage charts, body composition, heart, dark mode and themes (CSS variables), the theme browser UI, the Shortcut setup wizard and QR codes (rendered client-side, e.g. `qrcode` npm package, from a server-issued URL). Rust owns the data layer and the JSON API, plus auth sessions, MCP, ingest and the theme store.
 
-### Svelte vs React (neutral comparison)
+**Why React (over Svelte):** the most widely known framework with the largest ecosystem (chart libraries, component libraries, examples), a very stable API, and the best fit for the coding team and AI-assisted development. Svelte's smaller bundles matter little for a self-hosted dashboard.
 
-| | Svelte (SvelteKit `adapter-static`, or Vite + Svelte) | React (Vite + React) |
-|---|---|---|
-| Bundle size | Smaller: compiler, very small runtime (framework ~few KB gz) | Larger: React + ReactDOM ~45 KB gz baseline |
-| Charts / rings | ECharts (works with both, via a thin wrapper); d3 directly; LayerCake (Svelte-native, composable SVG); custom SVG rings are trivial | ECharts (`echarts-for-react` or thin wrapper); Recharts (simple, popular); visx (d3 primitives, flexible); custom SVG rings are trivial |
-| Theming | CSS variables work natively; scoped styles built in | CSS variables work natively; styling via CSS modules, Tailwind or CSS-in-JS (pick one) |
-| Routing / structure | SvelteKit gives routing and layouts out of the box (static adapter, SPA fallback) | Needs a router (React Router or TanStack Router) and data library (TanStack Query) |
-| Team fit | Easy to learn, less boilerplate; fewer devs and AI-generated examples; smaller ecosystem | Most widely known; largest ecosystem, component libraries, examples and hiring pool; more patterns to agree on |
-| Long-term maintenance | Svelte 5 (runes) changed the model in 2024, so older examples are outdated; fewer dependencies overall | Very stable API, huge community; more dependencies to keep updated (router, query, chart libs) |
-| TypeScript | Supported | Supported |
+### Proposed defaults
 
-Both build with Vite to static files, both fit the same Axum serving and API, and both use the same CSS-variable theme settings, so the choice doesn't affect the backend.
+| Concern | Proposed |
+|---|---|
+| Build | Vite, TypeScript (`strict`) |
+| Routing | React Router (data router: `createBrowserRouter`, loaders) |
+| API data | TanStack Query (caching, refetch, mutations); typed client generated from the OpenAPI spec if `utoipa` is used |
+| Charts | ECharts via `echarts-for-react` (or a thin wrapper) for sleep stages, trends, heart, body composition |
+| Activity rings | Custom SVG component (three arcs, overflow laps) |
+| Themes / dark mode | CSS variables set from the API's theme settings; `prefers-color-scheme` for Follow system |
+| Tests | Vitest + React Testing Library; ESLint + Prettier |
 
 ## API
 
@@ -59,7 +59,7 @@ crates/
   hv-core/            # models, sqlx queries, dedupe hashing, sleep score
   hv-themes/          # theme store + palette → CSS mapping (theming.md)
 migrations/           # sqlx migrations
-frontend/             # SPA (Svelte or React) + Vite; `npm run build` → frontend/dist
+frontend/             # Vite + React + TypeScript; `npm run build` → frontend/dist
 assets/               # signed .shortcut
 ```
 
@@ -69,7 +69,7 @@ assets/               # signed .shortcut
 
 ## Testing and CI
 
-- Frontend: `npm run lint`, type check (`svelte-check` or `tsc`), unit tests with Vitest, `npm run build`; Playwright smoke test against the built image later.
+- Frontend: `npm run lint`, type check (`tsc --noEmit`), Vitest + React Testing Library, `npm run build`; Playwright smoke test against the built image later.
 - `cargo test` (unit + integration tests with a temp SQLite DB and synthetic data generator), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`.
 - `SQLX_OFFLINE=true` in CI using the committed `.sqlx/` query data.
 - Tests prove per-user isolation (one user can never read another's data) and idempotent imports.
@@ -109,8 +109,11 @@ assets/               # signed .shortcut
 - **PR #1 (Python/FastAPI scaffold) is superseded.** It needs to be replaced with a Rust scaffold (workspace, Axum hello page, sqlx + first migration, Dockerfile, Compose, CI with cargo test/clippy/fmt, synthetic data generator). Toby decides whether to close it.
 - The build plan's later PRs map 1:1 onto Rust: models/migrations (sqlx), auth (argon2 + tower-sessions), theming, importer (quick-xml), ingest endpoint, Shortcut setup + QR, dashboard pages, MCP (rmcp), docs.
 
+## Resolved
+
+- **Frontend framework:** React (Vite + React + TypeScript), Nov 3, 2026.
+
 ## Open questions for Toby
 
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
-3. **Frontend framework:** Svelte (SvelteKit static adapter or Vite + Svelte) or React (Vite + React)? See the comparison above; Toby wants to discuss.
