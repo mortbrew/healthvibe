@@ -49,6 +49,36 @@ Category types (e.g. Sleep Analysis, Stand Hour) use the same block; `value` is 
 
 That's the whole Shortcut. It never shows a menu; the only prompt is the QR scan when no settings file exists.
 
+## Build and sign it yourself (Mac)
+
+Any user can skip the server-served file (QR code 1): build the Shortcut from this guide and, if you have a Mac, sign it yourself.
+
+**Requirements:** a Mac with macOS 12 Monterey or later (the `shortcuts` command-line tool ships with macOS at `/usr/bin/shortcuts`), signed into an Apple ID/iCloud, with iCloud sync for Shortcuts on if you build on iPhone. Network access is needed for `--mode anyone` (Apple notarizes through iCloud and receives a copy of the Shortcut). **Xcode is not needed** — the `shortcuts` tool is part of macOS, not Xcode.
+
+1. **Build** the Shortcut named **healthvibe**, block by block as above, in the Shortcuts app on macOS — or build it on your iPhone and let iCloud sync it to the Mac.
+2. **Export** it: in Shortcuts on the Mac, **File → Export** (or **Share → Export File**). Save as `healthvibe.shortcut`. (Export itself asks who can run it and produces a signed file; the CLI below does the same thing explicitly and is easy to script.)
+3. **Sign** it in Terminal:
+   ```sh
+   # anyone can import (notarized via iCloud)
+   shortcuts sign --mode anyone --input healthvibe.shortcut --output healthvibe-signed.shortcut
+   # or: sign locally; only your own devices / people who have you in Contacts can import
+   shortcuts sign --mode people-who-know-me --input healthvibe.shortcut --output healthvibe-signed.shortcut
+   ```
+   Short flags: `-m`, `-i`, `-o`. Default mode is `people-who-know-me`, which is enough for your own iPhone. Exit code 0 = success.
+4. **Transfer** `healthvibe-signed.shortcut` to the iPhone (AirDrop, Files/iCloud Drive, or email to yourself) and tap it to import into Shortcuts.
+5. **Configure** with **QR code 2** on the Setup page (or Help page), then set up the trigger as shown there.
+
+No Mac? You can still build it directly on your iPhone; a Shortcut you create on your own phone doesn't need signing at all. Then configure with QR code 2.
+
+**Contract a self-built Shortcut must keep** (the server checks it):
+- Name **healthvibe** (automations and help text refer to it).
+- Send `X-HV-Version` / `shortcut_version` matching a supported version (≥ `min_shortcut_version` from config; else `426`). Use the version printed at the top of this guide for your server's release.
+- Save settings to `iCloud Drive/Shortcuts/healthvibe/hv-config.json` with keys `server`, `token`, `device`, `configured_at`.
+- Use the claim/config/ingest endpoints and the upload JSON schema in [shortcut-design.md](shortcut-design.md) §3–4 exactly: metric keys and units from [metrics.md](metrics.md), only metrics in `enabled`, samples after `since`.
+- When the server releases a new Shortcut version, re-check this guide and update your copy.
+
+Sources: `shortcuts(1)` man page ([mirror](https://keith.github.io/xcode-man-pages/shortcuts.1.html)), `shortcuts sign -h` output ([Late Night Software forum](https://forum.latenightsw.com/t/can-sd-notary-sign-a-shortcut/4324)), [ss64: shortcuts](https://ss64.com/mac/shortcuts.html).
+
 ## Screenshots
 Planned, captured on iOS 26 for each block above and for:
 - Setup page steps 1–4 (choose metrics/trigger, QR 1, QR 2, finish).

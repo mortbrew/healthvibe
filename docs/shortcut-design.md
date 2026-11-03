@@ -69,7 +69,7 @@ sequenceDiagram
 The Setup page is a wizard; each step unlocks the next.
 
 1. **Choose what to sync (required).** Metric checkboxes (presets: Recommended / Everything / custom, see [metrics.md](metrics.md)) and the trigger (§6a). No QR code is shown until both are saved.
-2. **QR code 1: install the Shortcut.** Links to `https://<server>/shortcut/download/<token>` where `<token>` is a short-lived (15 min) HMAC-signed URL bound to the user; a logged-in session also works. The server returns the signed `healthvibe.shortcut` bundled in the release/Docker image (`app/static/shortcut/healthvibe-<version>.shortcut`), with `Content-Type: application/octet-stream` and a filename so iOS offers to import it. No GitHub or iCloud needed. Next to it: "Prefer to build it yourself?" → [shortcut-build.md](shortcut-build.md).
+2. **QR code 1: install the Shortcut.** Links to `https://<server>/shortcut/download/<token>` where `<token>` is a short-lived (15 min) HMAC-signed URL bound to the user; a logged-in session also works. The server returns the signed `healthvibe.shortcut` bundled in the release/Docker image (`app/static/shortcut/healthvibe-<version>.shortcut`), with `Content-Type: application/octet-stream` and a filename so iOS offers to import it. No GitHub or iCloud needed. **Alternative for every user:** build the Shortcut yourself from the block-by-block guide and, if you have a Mac, sign it yourself (`shortcuts sign`), then transfer it to the iPhone and continue with QR code 2 — see [Build and sign it yourself](shortcut-build.md#build-and-sign-it-yourself-mac). The wizard shows this option next to QR code 1.
 3. **QR code 2: configure.** Encodes `healthvibe://setup?server=https://<server>&code=<setup code>` as plain text (the Shortcut parses it). Setup code: one-time, ~10 min TTL, a **new code is generated each time the page loads** (older unused codes are invalidated). The user runs the Shortcut once by hand; with no `hv-config.json` it opens the camera ("Scan QR/Barcode"), claims the code (§3.4) and saves the token.
 4. **Finish.** The page polls for the first upload, then shows the trigger setup steps for the chosen trigger (§6a) and an "Open Shortcuts automations" button.
 
@@ -223,7 +223,7 @@ A web page (linked from Setup, Settings and every Shortcut error notification) t
 2. **Delete the Shortcut:** Shortcuts → long-press **healthvibe** → Delete.
 3. **Delete the saved settings file:** Files → iCloud Drive → Shortcuts → `healthvibe` → delete `hv-config.json` (or the whole folder).
 4. **Reset the token:** "Reset my upload token" button on the page (revokes the current token immediately; uploads from the old Shortcut get `401`). Sync settings and stored data are kept.
-5. **Reinstall:** the page shows **QR code 1** (fresh signed download link).
+5. **Reinstall:** the page shows **QR code 1** (fresh signed download link). Or build the Shortcut yourself and, with a Mac, sign it yourself: [Build and sign it yourself](shortcut-build.md#build-and-sign-it-yourself-mac).
 6. **Reconfigure:** the page shows **QR code 2** (fresh setup code), then the trigger instructions again.
 
 Optional: Settings → Health → Data Access → Shortcuts to review or reset Health permissions. Each step gets a screenshot (planned, see [shortcut-build.md](shortcut-build.md#screenshots)).
