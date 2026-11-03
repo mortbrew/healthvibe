@@ -275,6 +275,52 @@ CREATE TABLE insight_runs (
 1. **Operator `.env` per provider** (e.g. `HEALTHVIBE_OPENAI_API_KEY`): simplest, never in the DB, but shared by all users of the instance.
 2. **Per-user key encrypted at rest** in SQLite, using a master key from `.env` (`HEALTHVIBE_SECRET_KEY`, e.g. AES-GCM/XChaCha20-Poly1305). This is true BYOK per user, but it relaxes the earlier "never persisted in the DB" rule (encrypted only, never in plaintext or the repo). The keys are lost if the master key is lost.
 
+### Provider-neutral insight memory
+
+**Decision (Toby):** API keys are stored **per user, encrypted**. This resolves the key-supply question above toward option 2. An operator `.env` key per provider stays as an optional fallback, e.g. for single-user installs.
+
+AI history lives in a **local encrypted file per user**, next to that user's encrypted keys:
+
+```
+appdata/users/<id>/memory.enc
+appdata/users/<id>/keys.enc
+```
+
+It is **not** a raw chat transcript tied to one LLM. It is a structured, versioned, provider-neutral record. A user who switches providers mid-year (e.g. Gemini → Grok) feeds the same file to the new provider and keeps full context. This fixes the problem of every API call starting fresh.
+
+```json
+{
+  "schema_version": 1,
+  "user_id": 1,
+  "updated_at": "2026-11-03T12:00:00Z",
+  "summary": "Compact rolling summary of what is known so far…",
+  "insights": [
+    { "id": "ins_…", "text": "Resting HR down ~4 bpm since starting X", "metrics": ["restingHeartRate"],
+      "date_range": ["2026-01-01", "2026-03-31"], "confidence": "medium",
+      "provider": "gemini", "model": "…", "created_at": "…", "superseded_by": null }
+  ],
+  "correlations": [
+    { "id": "cor_…", "event": "magnesium", "metric": "sleep_score", "effect": "+3.1 avg",
+      "evidence": { "n_with": 42, "n_without": 38, "method": "mean diff" },
+      "date_range": ["…", "…"], "provider": "xai", "model": "…", "created_at": "…" }
+  ],
+  "questions": [ { "id": "q_…", "text": "Does caffeine timing affect deep sleep?", "status": "open", "created_at": "…" } ],
+  "conclusions": [ { "id": "con_…", "text": "…", "based_on": ["ins_…", "cor_…"], "created_at": "…" } ],
+  "feedback": [ { "target": "ins_…", "rating": "useful|wrong|irrelevant", "note": "…", "created_at": "…" } ]
+}
+```
+
+Every entry records the **provider and model** that produced it, plus timestamps. `schema_version` allows migrations.
+
+**How it is used**
+
+- **Prompt injection each run:** the compact `summary`, plus entries relevant to the run's scope (matching metrics, events, date window, open questions, recent feedback). The whole file is never sent.
+- **MCP:** a read-only `get_insight_memory` tool (filters: metric, event, date range, kind) lets external clients and in-app runs fetch more on demand.
+- **Write-back:** after a run, new insights, correlations and conclusions are merged in. Contradicted entries are marked `superseded_by`, not deleted.
+- **Compaction:** when the file grows past a budget, older or superseded entries are folded into `summary` (an LLM or rule-based pass), so injected context stays within the model's window.
+
+**Loss and backups:** a lost key means lost keys and lost memory. There are no backups in v1 (as decided), and the UI and docs warn about this.
+
 ## History and superseded work
 
 - Linux Admin Bot's earlier receiver in `/workspace/health` on the shared box is a **Python receiver built for Health Auto Export**. It is a reference only (Compose conventions, store-raw-then-parse, token checks); none of its code is used.
@@ -293,8 +339,10 @@ CREATE TABLE insight_runs (
 - **Event logging and AI insights:** build the events/event_changes/event_occurrences tables, the web UI for logging, and the read-only MCP tools (`list_events`, `compare_before_after`, `correlate_event_with_metric`, ...). Decide dose-change modelling. Synthetic data only. See [Event logging and AI insights](#event-logging-and-ai-insights).
 - **Multi-LLM insights (BYOK):** implement the `LlmProvider` trait (OpenAI-compatible first, then Anthropic/Gemini adapters), shared tool layer for MCP + in-app insights, opt-in UI and data-sent disclosure, model-quality recommendation. Decide how keys are supplied at run time. Scheduled runs need a server-side key: operator `.env` per provider vs. per-user key encrypted at rest (see [Scheduled insights](#scheduled-insights-background-runs)). See [Multi-LLM support](#multi-llm-support-bring-your-own-key).
 - **Scheduled insights:** `insight_schedules` + `insight_runs` tables, in-process scheduler (`tokio-cron-scheduler`), per-run token cap, Insights review page, optional completion notification and "Run now".
+- **Insight memory:** per-user encrypted `memory.enc` + `keys.enc`, versioned JSON schema, relevance-based prompt injection, `get_insight_memory` MCP tool, write-back and compaction. Resolve the encryption open question first.
 
 ## Open questions for Toby
 
 1. **Shortcut upload receiver:** fold it into the main binary (**recommended**: one binary, separate route and `upload` token scope, shared DB and dedupe code) or run it as a separate small service?
 2. **PR #1:** close it and redo the scaffold in Rust?
+- **Encryption for keys and insight memory:** cipher (e.g. XChaCha20-Poly1305, or `age`), and where the key comes from: (a) master key in `.env`, ideally envelope encryption with a per-user data key wrapped by the master key; or (b) a user-derived key via argon2 from the password. Tradeoff: (b) can't decrypt during scheduled background runs when no user is signed in. Mitigations: use (a), or cache a wrapped data key server-side after login (weakens (b)'s guarantee). Either way, a lost key means lost data; no backups in v1.
