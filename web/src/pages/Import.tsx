@@ -64,7 +64,13 @@ export default function Import() {
             onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
           {progress === null ? "Choose export.zip…" : `Uploading… ${Math.round(progress * 100)}%`}
         </label>
-        {progress !== null && <progress value={progress} max={1} />}
+        {progress !== null && <progress value={progress} max={1} aria-label="Upload progress" />}
+        {progress === null && jobs.some((j) => j.status === "running") && (
+          <div className="processing">
+            <p className="muted small">Uploaded. Reading your export… this can take a few minutes for large files.</p>
+            <progress aria-label="Import in progress" />
+          </div>
+        )}
         {err && <p className="error">{err}</p>}
         <p className="muted foot">
           Prefer automatic daily syncing? See the <Link to="/help/shortcut">iPhone Shortcut guide</Link>.

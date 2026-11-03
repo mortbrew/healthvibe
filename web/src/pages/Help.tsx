@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { api, explain } from "../api";
+import { SetupQr, useSync, DeviceLine } from "../components/Sync";
 import { Link } from "../router";
 
 /** Placeholder for a screenshot that hasn't been captured on a real iPhone yet. */
@@ -35,6 +37,10 @@ export function HelpIndex() {
         <Link to="/help/shortcut" className="card linkcard">
           <h2>Set up the iPhone Shortcut</h2>
           <p className="muted">Send new Health data automatically every day, step by step.</p>
+        </Link>
+        <Link to="/help/build" className="card linkcard">
+          <h2>Build the Shortcut yourself</h2>
+          <p className="muted">Every action, in order, to make the healthvibe Shortcut by hand.</p>
         </Link>
         <Link to="/help/messed-up" className="card linkcard">
           <h2>Help, I messed up my Shortcut</h2>
@@ -87,20 +93,19 @@ export function ShortcutGuide() {
         <h1>Set up the iPhone Shortcut</h1>
       </header>
       <div className="card notice">
-        <b>Preview.</b> The signed Shortcut download, upload tokens and the setup QR codes arrive in a later
-        release. Until then, use <Link to="/import">Import</Link> with an <code>export.zip</code>.
+        <b>No ready-made download yet.</b> The signed Shortcut file (QR code 1) isn't published, so for now
+        {" "}<Link to="/help/build">build it yourself</Link> (about 20 minutes), then come back for step 3.
       </div>
       <ol className="guide">
-        <Step n={1} title="Install the Shortcut" shot="Add Shortcut sheet">
-          <p>On your iPhone, scan <b>QR code 1</b> with the Camera app (or open the link on the phone) and tap <b>Add Shortcut</b>.</p>
-          <div className="qr placeholder">QR code 1</div>
+        <Step n={1} title="Choose what to sync">
+          <p>In <Link to="/settings">Settings → iPhone Shortcut sync</Link>, tick what you want to send and save. Only those types are read on the phone.</p>
         </Step>
-        <Step n={2} title="Allow Health access" shot="Allow access to Health">
-          <p>Run <b>healthvibe</b> once from the Shortcuts app. When asked, tap <b>Allow</b> for each Health type. You can review this later in Settings → Health → Data Access → Shortcuts.</p>
+        <Step n={2} title="Get the Shortcut on your iPhone">
+          <p>Follow <Link to="/help/build">Build the Shortcut yourself</Link>. Run it once from the Shortcuts app and tap <b>Allow</b> for each Health type it asks about (you can review this later in Settings → Health → Data Access → Shortcuts).</p>
         </Step>
-        <Step n={3} title="Connect it to your account" shot="Scan setup code">
-          <p>The first run asks you to scan <b>QR code 2</b>. It saves your server address and personal upload token to <code>hv-config.json</code> in iCloud Drive → Shortcuts → healthvibe.</p>
-          <div className="qr placeholder">QR code 2</div>
+        <Step n={3} title="Connect it to your account">
+          <p>On the first run the Shortcut opens the camera. Scan this code. It is new every time this page loads, works once, and expires after 10 minutes. The Shortcut saves your server address and personal upload token to <code>hv-config.json</code> in iCloud Drive → Shortcuts → healthvibe.</p>
+          <SetupQr />
         </Step>
         <Step n={4} title="Choose when it runs">
           <div className="segmented vertical" role="radiogroup">
@@ -153,19 +158,39 @@ export function MessedUp() {
         </Step>
         <Step n={4} title="Reset your upload token">
           <p>This immediately stops the old Shortcut from uploading. Your sync settings and stored data are kept.</p>
-          <button className="danger" disabled title="Arrives with Shortcut uploads">Reset my upload token</button>
-          <p className="muted small">Available once Shortcut uploads ship.</p>
+          <ResetToken />
         </Step>
         <Step n={5} title="Reinstall">
-          <p>Scan <b>QR code 1</b> for a fresh signed download, or build and sign the Shortcut yourself on a Mac (see <code>docs/shortcut-build.md</code>).</p>
-          <div className="qr placeholder">QR code 1</div>
+          <p>Build it again with <Link to="/help/build">Build the Shortcut yourself</Link> (a signed download, QR code 1, isn't published yet).</p>
         </Step>
         <Step n={6} title="Reconfigure">
-          <p>Run it once and scan <b>QR code 2</b> (a fresh setup code), then create the automation again with the <Link to="/help/shortcut">setup guide</Link>.</p>
-          <div className="qr placeholder">QR code 2</div>
+          <p>Run it once and scan this fresh setup code, then create the automation again with the <Link to="/help/shortcut">setup guide</Link>.</p>
+          <SetupQr />
         </Step>
       </ol>
       <p className="muted">Optional: Settings → Health → Data Access → Shortcuts to review or reset Health permissions.</p>
     </div>
+  );
+}
+
+function ResetToken() {
+  const { info, reload } = useSync();
+  const [msg, setMsg] = useState<string | null>(null);
+  const reset = async () => {
+    if (!confirm("Disconnect the iPhone? Its Shortcut stops uploading until you scan a new setup code.")) return;
+    try {
+      const r = await api<{ revoked: boolean }>("/sync/token", { method: "DELETE" });
+      setMsg(r.revoked ? "Done. The old Shortcut can no longer upload." : "There was no connected iPhone.");
+      reload();
+    } catch (e) {
+      setMsg(explain(e));
+    }
+  };
+  return (
+    <>
+      {info && <DeviceLine info={info} />}
+      <button className="danger" onClick={reset}>Reset my upload token</button>
+      {msg && <p className="muted small">{msg}</p>}
+    </>
   );
 }

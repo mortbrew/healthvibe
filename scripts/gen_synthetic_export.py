@@ -109,6 +109,16 @@ def main():
             rec(out, HK + "BodyMass", "Smart Scale", "kg", round(weight, 1), s)
             rec(out, HK + "BodyFatPercentage", "Smart Scale", "%", round(0.22 + (weight - 80) * 0.004 + rnd.uniform(-0.004, 0.004), 3), s)
 
+    # Daily ring goals, as Apple writes them (ActivitySummary). The Move goal
+    # is raised halfway through so goal changes show up on the dashboard.
+    for i in range(a.days):
+        day = end - dt.timedelta(days=a.days - 1 - i)
+        move = 550 if i < a.days // 2 else 620
+        out.append(
+            f' <ActivitySummary dateComponents="{day.isoformat()}" activeEnergyBurnedGoal="{move}"'
+            ' activeEnergyBurnedUnit="kcal" appleExerciseTimeGoal="30" appleStandHoursGoal="12"/>'
+        )
+
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE HealthData>\n'
         '<HealthData locale="en_US">\n'

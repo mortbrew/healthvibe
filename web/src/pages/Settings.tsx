@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, User } from "../api";
 import { applyTheme, DARK, LIGHT, Mode, ThemePrefs } from "../theme";
 import { ChangePassword } from "./Auth";
+import { SyncSettings } from "../components/Sync";
 
 export default function Settings({ user, onUser }: { user: User; onUser: (u: User) => void }) {
   const [t, setT] = useState<ThemePrefs>({ mode: user.theme_mode, light: user.theme_light, dark: user.theme_dark });
@@ -38,6 +39,7 @@ export default function Settings({ user, onUser }: { user: User; onUser: (u: Use
         <Palettes set={DARK} value={t.dark} onPick={(dark) => save({ ...t, dark })} />
         <p className="muted foot">Follow system uses the light or dark palette to match your device.</p>
       </section>
+      <SyncSettings />
       <ChangePassword user={user} onDone={onUser} />
     </div>
   );

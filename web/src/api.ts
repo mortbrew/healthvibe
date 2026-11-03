@@ -43,6 +43,8 @@ export const messages: Record<string, string> = {
   already_set_up: "This server is already set up. Sign in instead.",
   upload_failed: "The upload failed. Try again.",
   missing_file: "Pick an export.zip file first.",
+  no_metrics: "Choose at least one thing to sync.",
+  choose_metrics_first: "Choose what to sync in Settings first.",
 };
 
 export const explain = (e: unknown) =>
@@ -76,8 +78,39 @@ export type Night = {
   core_min: number;
   deep_min: number;
   unspecified_min: number;
+  asleep_min: number;
   in_bed_min: number;
 };
 export type Sleep = { nights: Night[]; last_night: { stage: string; start: string; end: string }[] };
 export type Series = { unit: string | null; points: DayValue[] };
 export type Body = { weight: Series; body_fat: Series; lean_mass: Series };
+
+export type SyncMetric = {
+  key: string;
+  name: string;
+  area: string;
+  unit: string;
+  kind: "quantity" | "category" | "workout";
+  recommended: boolean;
+  shortcut_type: string;
+};
+export type SyncDevice = {
+  device: string | null;
+  shortcut_version: string | null;
+  created_at: string;
+  last_seen_at: string | null;
+  last_upload_at: string | null;
+};
+export type SyncInfo = {
+  metrics: SyncMetric[];
+  configured: boolean;
+  enabled: string[];
+  trigger: string;
+  notify: string;
+  triggers: string[];
+  device: SyncDevice | null;
+  server: string;
+  public_url_set: boolean;
+  shortcut_version: string;
+};
+export type SetupCode = { code: string; expires_at: string; server: string; public_url_set: boolean; link: string };

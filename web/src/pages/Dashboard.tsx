@@ -147,7 +147,7 @@ function HeartCard({ h }: { h: Heart }) {
 
 function SleepCard({ s }: { s: Sleep }) {
   const last = s.nights[s.nights.length - 1];
-  const asleep = (n: Sleep["nights"][number]) => n.rem_min + n.core_min + n.deep_min + n.unspecified_min;
+  const asleep = (n: Sleep["nights"][number]) => n.asleep_min;
   return (
     <section className="card sleep">
       <div className="cardhead">

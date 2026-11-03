@@ -156,3 +156,13 @@ progress { width: 100%; accent-color: var(--accent); }
 .linkcard { color: var(--text); }
 .linkcard:hover { border-color: var(--accent); }
 @media (max-width: 760px) { .step { grid-template-columns: auto 1fr; } .shot { grid-column: 2; justify-self: start; } }
+.metricgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin: 0.75rem 0; }
+.metricgrid fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 0.5rem 0.75rem; }
+.metricgrid legend { color: var(--muted); font-size: 0.82rem; }
+.check { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0; }
+.row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
+.field { display: grid; gap: 0.25rem; margin: 0.75rem 0; max-width: 320px; }
+.qrbox { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; margin-top: 0.5rem; }
+img.qr { width: 220px; height: 220px; border-radius: 12px; background: #fff; padding: 6px; }
+.codeblock { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; }
+.action { color: var(--accent); }

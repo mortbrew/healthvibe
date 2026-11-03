@@ -45,9 +45,10 @@ pub fn routes() -> Router<AppState> {
         .route("/dashboard/heart", get(heart))
         .route("/dashboard/sleep", get(sleep))
         .route("/dashboard/body", get(body))
+        .merge(crate::sync::routes())
 }
 
-pub struct ApiError(StatusCode, &'static str);
+pub struct ApiError(pub StatusCode, pub &'static str);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -62,9 +63,9 @@ impl<E: std::fmt::Display> From<E> for ApiError {
     }
 }
 
-type ApiResult<T = Json<Value>> = Result<T, ApiError>;
+pub type ApiResult<T = Json<Value>> = Result<T, ApiError>;
 
-fn bad(code: &'static str) -> ApiError {
+pub fn bad(code: &'static str) -> ApiError {
     ApiError(StatusCode::BAD_REQUEST, code)
 }
 

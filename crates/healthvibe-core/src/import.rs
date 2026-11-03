@@ -33,6 +33,41 @@ pub struct TypeCount {
     pub duplicates: u64,
 }
 
+/// One day's Activity ring goals (`<ActivitySummary>`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Goal {
+    pub date: String,
+    pub move_kcal: Option<f64>,
+    pub exercise_min: Option<f64>,
+    pub stand_hours: Option<f64>,
+}
+
+/// Something parsed out of export.xml.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Item {
+    Row(Row),
+    Goal(Goal),
+}
+
+pub const ACTIVITY_SUMMARY: &str = "ActivitySummary";
+
+fn to_goal(a: &BTreeMap<String, String>) -> Option<Goal> {
+    let date = a.get("dateComponents")?;
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    let num = |k: &str| {
+        a.get(k)
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| *v > 0.0)
+    };
+    let g = Goal {
+        date: date.clone(),
+        move_kcal: num("activeEnergyBurnedGoal"),
+        exercise_min: num("appleExerciseTimeGoal"),
+        stand_hours: num("appleStandHoursGoal"),
+    };
+    (g.move_kcal.is_some() || g.exercise_min.is_some() || g.stand_hours.is_some()).then_some(g)
+}
+
 pub type Counts = BTreeMap<String, TypeCount>;
 
 /// Apple dates look like `2024-01-02 07:30:00 -0500`.
@@ -100,7 +135,7 @@ fn to_row(tag: &[u8], a: &BTreeMap<String, String>) -> Option<Row> {
 /// Stream-parse export.xml, calling `sink` with batches of rows.
 pub fn parse_export<R: BufRead>(
     r: R,
-    mut sink: impl FnMut(Vec<Row>) -> anyhow::Result<()>,
+    mut sink: impl FnMut(Vec<Item>) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let mut reader = Reader::from_reader(r);
     let mut buf = Vec::with_capacity(4096);
@@ -109,8 +144,14 @@ pub fn parse_export<R: BufRead>(
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e) => {
                 let name = e.name();
-                if let Some(row) = to_row(name.as_ref(), &attrs(&e)) {
-                    batch.push(row);
+                let a = attrs(&e);
+                let item = if name.as_ref() == b"ActivitySummary" {
+                    to_goal(&a).map(Item::Goal)
+                } else {
+                    to_row(name.as_ref(), &a).map(Item::Row)
+                };
+                if let Some(item) = item {
+                    batch.push(item);
                     if batch.len() >= BATCH {
                         sink(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)))?;
                     }
@@ -130,7 +171,7 @@ pub fn parse_export<R: BufRead>(
 /// Find export.xml inside the zip (not export_cda.xml) and stream it.
 pub fn parse_zip<R: Read + Seek>(
     r: R,
-    sink: impl FnMut(Vec<Row>) -> anyhow::Result<()>,
+    sink: impl FnMut(Vec<Item>) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let mut zip = zip::ZipArchive::new(r)?;
     let idx = (0..zip.len())
@@ -147,11 +188,41 @@ pub fn parse_zip<R: Read + Seek>(
 async fn insert_batch(
     db: &SqlitePool,
     user_id: i64,
-    rows: Vec<Row>,
+    items: Vec<Item>,
     counts: &mut Counts,
 ) -> anyhow::Result<()> {
     let mut tx = db.begin().await?;
-    for r in rows {
+    for item in items {
+        let r = match item {
+            Item::Row(r) => r,
+            Item::Goal(g) => {
+                let res = sqlx::query(
+                    "INSERT INTO activity_goals (user_id, date, move_kcal, exercise_min, stand_hours)
+                     VALUES (?, ?, ?, ?, ?)
+                     ON CONFLICT (user_id, date) DO UPDATE SET
+                       move_kcal = excluded.move_kcal,
+                       exercise_min = excluded.exercise_min,
+                       stand_hours = excluded.stand_hours
+                     WHERE move_kcal IS NOT excluded.move_kcal
+                        OR exercise_min IS NOT excluded.exercise_min
+                        OR stand_hours IS NOT excluded.stand_hours",
+                )
+                .bind(user_id)
+                .bind(&g.date)
+                .bind(g.move_kcal)
+                .bind(g.exercise_min)
+                .bind(g.stand_hours)
+                .execute(&mut *tx)
+                .await?;
+                let c = counts.entry(ACTIVITY_SUMMARY.to_string()).or_default();
+                if res.rows_affected() == 1 {
+                    c.inserted += 1;
+                } else {
+                    c.duplicates += 1;
+                }
+                continue;
+            }
+        };
         let res = sqlx::query(
             "INSERT OR IGNORE INTO readings
              (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, hash,
@@ -184,7 +255,7 @@ async fn insert_batch(
 
 /// Import a zip file on disk for a user. Returns per-type counts.
 pub async fn import_zip(db: &SqlitePool, user_id: i64, path: &Path) -> anyhow::Result<Counts> {
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<Row>>(4);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<Item>>(4);
     let path = path.to_path_buf();
     let parser = tokio::task::spawn_blocking(move || {
         let f = std::fs::File::open(path)?;
@@ -267,6 +338,30 @@ mod tests {
             Ok(())
         })
         .unwrap();
+        let goals: Vec<Goal> = rows
+            .iter()
+            .filter_map(|i| match i {
+                Item::Goal(g) => Some(g.clone()),
+                _ => None,
+            })
+            .collect();
+        let rows: Vec<Row> = rows
+            .into_iter()
+            .filter_map(|i| match i {
+                Item::Row(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            goals,
+            vec![Goal {
+                date: "2024-01-02".into(),
+                move_kcal: Some(650.0),
+                exercise_min: Some(45.0),
+                stand_hours: Some(10.0),
+            }],
+            "summary without goals is skipped"
+        );
         assert_eq!(rows.len(), 6);
         assert_eq!(rows[0].kind, "HKQuantityTypeIdentifierStepCount");
         assert_eq!(rows[0].start_utc, "2024-01-02T12:00:00Z");
@@ -291,6 +386,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 5);
+        let g: (f64, f64, f64) = sqlx::query_as(
+            "SELECT move_kcal, exercise_min, stand_hours FROM activity_goals
+             WHERE user_id = 1 AND date = '2024-01-02'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(g, (650.0, 45.0, 10.0));
         let job = create_job(&db, 1).await.unwrap();
         run_job(&db, job, 1, &p).await;
         assert!(!p.exists(), "staged zip deleted after import");

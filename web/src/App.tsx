@@ -8,6 +8,7 @@ import Import from "./pages/Import";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import { HelpIndex, MessedUp, ShortcutGuide } from "./pages/Help";
+import BuildGuide from "./pages/Build";
 
 type Session = { needs_setup: boolean; user: User | null };
 
@@ -66,6 +67,7 @@ export default function App() {
   else if (path === "/help") page = <HelpIndex />;
   else if (path === "/help/shortcut") page = <ShortcutGuide />;
   else if (path === "/help/messed-up") page = <MessedUp />;
+  else if (path === "/help/build") page = <BuildGuide />;
   else page = <div className="card empty"><h2>Not found</h2><Link to="/">Back to the dashboard</Link></div>;
 
   const nav = [
