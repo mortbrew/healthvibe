@@ -8,11 +8,11 @@ healthvibe is a self-hosted, multi-user Apple Health dashboard (FastAPI, SQLite,
 
 | Topic | Decision |
 |---|---|
-| Distribution | A signed `.shortcut` file made on a friend's Mac once per release (`shortcuts sign --mode anyone`) and attached to the GitHub release. Signing without a Mac is under research (§9). |
+| Distribution | A signed `.shortcut` file made on a friend's Mac for each release (`shortcuts sign --mode anyone`), bundled in the release/image and **served by the healthvibe server itself** (QR code 1). A "Build it yourself" guide lets users verify or recreate it ([shortcut-build.md](shortcut-build.md)). Signing without a Mac: see §9. |
 | Shape | One master Shortcut with a `Find Health Samples` block for every supported metric ([metrics.md](metrics.md)), each gated on whether that metric is enabled. |
-| Metric choice | Lives in both places; **the web app wins**. The Shortcut GETs the enabled list on every run. A first-run Choose Menu lets the user pick on the phone, and that choice is synced up to the server. The server rejects metrics that aren't enabled. |
-| Onboarding | The web app shows a QR code holding the server URL and a one-time setup code; the Shortcut exchanges it for a per-user upload token stored on the phone. |
-| Trigger | User picks one on first run (§6a); default "Alarm is stopped", **Run Immediately**. Health data can only be read while the phone is unlocked. |
+| Metric choice | **Web UI only.** The user must choose metrics (and a trigger) on the Setup page before any QR code is shown; changes are made only on the Data Sources page. The Shortcut has no config menus; it GETs the enabled list every run. The server rejects metrics that aren't enabled. |
+| Onboarding | Choose sync settings → **QR code 1** installs the Shortcut from the server → **QR code 2** (server URL + one-time setup code) configures it; the code is exchanged for a per-user upload token stored on the phone (§2a). |
+| Trigger | User picks one in the web UI (§6a), which shows the setup steps; default "Alarm is stopped", **Run Immediately**. Health data can only be read while the phone is unlocked. |
 | export.xml | Default: store everything, show only enabled metrics. Option at import time: import only selected metrics (§7). |
 | Sleep score | Apple's score isn't readable; healthvibe computes its own (§8). |
 
@@ -27,17 +27,21 @@ sequenceDiagram
     participant H as Apple Health
 
     rect rgb(40,40,60)
-    note over U,S: One-time setup
+    note over U,S: One-time setup (Setup page, web UI)
     U->>W: Log in, open Setup page
-    W-->>U: Link to signed .shortcut (this release) + QR (url + setup code, 10 min, one use)
-    U->>S: Import signed Shortcut, run it once
-    S->>U: Scan QR (camera)
+    U->>W: Step 1: choose metrics + trigger (required)
+    W-->>U: Step 2: QR 1 = install link (login or short-lived signed URL)
+    U->>W: Scan QR 1 on iPhone → GET /shortcut/download/<signed>
+    W-->>U: healthvibe.shortcut (signed, bundled with this release)
+    U->>S: Import Shortcut
+    W-->>U: Step 3: QR 2 = server URL + one-time setup code (~10 min, new on each page load)
+    U->>S: Run Shortcut manually → no config yet → scan QR 2
     S->>W: POST /api/v1/shortcut/claim {setup_code, device_name, shortcut_version}
-    W-->>S: {upload_token, user, server_config}
+    W-->>S: {upload_token, config}
     S->>S: Save hv-config.json in iCloud Drive/Shortcuts
-    S->>U: Choose Menu: metrics to enable (pre-ticked from server defaults)
-    S->>W: PUT /api/v1/shortcut/metrics {enabled[]} (accepted only if web app has no explicit choice yet)
-    U->>U: Create "Alarm is stopped" automation, Run Immediately
+    S->>H: First upload (Health permission sheet)
+    W-->>U: Step 4: trigger setup steps, "first upload received ✓"
+    U->>U: Create automation for chosen trigger, Run Immediately
     end
 
     rect rgb(30,50,40)
@@ -59,6 +63,17 @@ sequenceDiagram
     S->>U: Notification per user setting (Always / Only on errors)
     end
 ```
+
+## 2a. Onboarding (Setup page)
+
+The Setup page is a wizard; each step unlocks the next.
+
+1. **Choose what to sync (required).** Metric checkboxes (presets: Recommended / Everything / custom, see [metrics.md](metrics.md)) and the trigger (§6a). No QR code is shown until both are saved.
+2. **QR code 1: install the Shortcut.** Links to `https://<server>/shortcut/download/<token>` where `<token>` is a short-lived (15 min) HMAC-signed URL bound to the user; a logged-in session also works. The server returns the signed `healthvibe.shortcut` bundled in the release/Docker image (`app/static/shortcut/healthvibe-<version>.shortcut`), with `Content-Type: application/octet-stream` and a filename so iOS offers to import it. No GitHub or iCloud needed. Next to it: "Prefer to build it yourself?" → [shortcut-build.md](shortcut-build.md).
+3. **QR code 2: configure.** Encodes `healthvibe://setup?server=https://<server>&code=<setup code>` as plain text (the Shortcut parses it). Setup code: one-time, ~10 min TTL, a **new code is generated each time the page loads** (older unused codes are invalidated). The user runs the Shortcut once by hand; with no `hv-config.json` it opens the camera ("Scan QR/Barcode"), claims the code (§3.4) and saves the token.
+4. **Finish.** The page polls for the first upload, then shows the trigger setup steps for the chosen trigger (§6a) and an "Open Shortcuts automations" button.
+
+The Shortcut's only interactive step is that first-run QR scan; there are no metric or trigger menus in it.
 
 ## 3. Configuration
 
@@ -92,7 +107,8 @@ Auth: `Authorization: Bearer <upload token>`.
   "max_lookback_days": 30,
   "max_samples_per_metric": 5000,
   "max_request_bytes": 5242880,
-  "notify": "errors_only"
+  "notify": "errors_only",
+  "trigger": "alarm_stopped"
 }
 ```
 
@@ -100,8 +116,8 @@ Auth: `Authorization: Bearer <upload token>`.
 
 Metric keys are the HealthKit identifier without the `HKQuantityTypeIdentifier` / `HKCategoryTypeIdentifier` prefix (see [metrics.md](metrics.md)). A metric with no prior upload gets `since = now - default_lookback_days`.
 
-### 3.3 `PUT /api/v1/shortcut/metrics` (first-run sync)
-Body `{"enabled": ["stepCount", …], "source": "shortcut-first-run"}`. Web app wins: if the user has already saved choices on the Data Sources page, the server returns `409` with the server list and the Shortcut uses that. Otherwise the phone's list is saved and marked as user-chosen.
+### 3.3 No write-back from the phone
+There is no endpoint for the Shortcut to change settings. Metrics, trigger and notification choice are edited only in the web UI, so a user can't break their setup from the phone. The upload token's scope is `upload` + reading its own config.
 
 ### 3.4 `POST /api/v1/shortcut/claim`
 Body `{"setup_code": "…", "device_name": "…", "shortcut_version": "0.1.0"}` → `{"upload_token": "hvu_…", "config": {…same as 3.2…}}`. **One device per user:** each user has a single upload token; claiming a new setup code revokes the previous token (moving to a new phone = scan a new QR). Setup code: 128-bit random, 10-minute TTL, single use, hashed at rest, rate-limited per IP.
@@ -163,16 +179,15 @@ Rules:
 - **Gaps.** If the user skipped days (phone off, alarm not used), `since` is older than `max_lookback_days`; the Shortcut caps at that and the web app shows "gap: import export.xml or run the Shortcut manually with backfill".
 - **Edits/deletions in Health** are not detected (Shortcuts has no anchored query). Known limitation; a fresh export.xml import fixes it.
 
-## 6a. Choosing a trigger on first run
+## 6a. Choosing a trigger (web UI)
 
-Shortcuts can't create automations itself, so after QR setup and metric choice the Shortcut asks how it should run, saves the answer, and walks the user through creating the automation.
+Shortcuts can't create automations itself, and settings live only in the web UI, so the trigger is chosen on the Setup page (step 1) and changed on the Settings page; the Shortcut never asks.
 
-1. **Choose Menu** "How should healthvibe run each day?" (choices below).
-2. Saves `trigger` in `hv-config.json` and sends it with `PUT /api/v1/shortcut/trigger {"trigger": "alarm_stopped", "detail": "Wake-up alarm"}`. The server keeps it in the user's config (web app shows it and uses it for the stale-upload warning). Unlike metrics, the phone's choice is kept here because only the phone knows which automation exists.
-3. Shows a **Quick Look/Show Result** text with step-by-step instructions for that trigger (below).
-4. **Opens the Automation tab** with `Open URLs` → `shortcuts://automations` (or `shortcuts://create-automation` to jump straight to the new-automation sheet). Neither is in Apple's documented URL-scheme list ([Apple: Shortcuts URL schemes](https://support.apple.com/guide/shortcuts/apda283236d7/ios)), but both are reported working by users and developers ([Stack Overflow](https://stackoverflow.com/questions/69969746/how-to-deep-link-to-automation-in-shortcut-app), [r/shortcuts](https://www.reddit.com/r/shortcuts/comments/1fdkqaj/shortcuts_automation_url_scheme/)). Test on iOS 26/27; if it fails, fall back to plain `shortcuts://` and the instructions say "tap Automation".
+1. User picks a trigger from the list below; saved as `trigger` in the user's server config (used for the stale-upload warning, sent in `config` for display only).
+2. The web UI shows step-by-step instructions for that trigger (text + planned screenshots).
+3. An **"Open Shortcuts automations"** button (shown on iPhone) links to `shortcuts://automations` (or `shortcuts://create-automation` for the new-automation sheet). Neither is in Apple's documented URL-scheme list ([Apple: Shortcuts URL schemes](https://support.apple.com/guide/shortcuts/apda283236d7/ios)), but both are reported working ([Stack Overflow](https://stackoverflow.com/questions/69969746/how-to-deep-link-to-automation-in-shortcut-app), [r/shortcuts](https://www.reddit.com/r/shortcuts/comments/1fdkqaj/shortcuts_automation_url_scheme/)). Test on iOS 26/27; fall back to `shortcuts://` + "tap Automation".
 
-| Menu option | Trigger in Shortcuts | Run without asking? | Notes |
+| Option | Trigger in Shortcuts | Run without asking? | Notes |
 |---|---|---|---|
 | When I stop my alarm (recommended) | Alarm → Is Stopped → Wake-up / Any | **Yes** (Alarm is on Apple's list) | Phone is usually being unlocked, so Health reads work. |
 | At a set time | Time of Day → time, Daily | **Yes** | Fails silently if the phone is locked at that time; next run catches up. |
@@ -190,7 +205,7 @@ Instruction text template (alarm example):
 4. Tap **Next** → pick the **healthvibe** shortcut → **Done**.
 5. Tomorrow, check the web app's Status card for "last upload".
 
-The Choose Menu, Ask for Input and Show Result steps only run on first run / when `hv-config.json` lacks a trigger; automated runs never hit an interactive step (those would block Run Immediately). Re-run setup any time with the Shortcut's "Settings" option (shown when run manually).
+Automated runs never hit an interactive step (that would block Run Immediately); the only interactive step is the QR scan when `hv-config.json` is missing. Changing the trigger in the web UI just updates the instructions — the user edits the automation on the phone.
 
 **Catch-up and stale warnings.** Every run uploads everything since the last successful upload (§5), so missed days catch up automatically (capped at `max_lookback_days`). The server records `last_upload_at` per device; the web app shows a banner and dashboard Status card when no upload arrived for longer than expected for the chosen trigger (default: 36 h for daily triggers, off for Manual), e.g. "No upload from Toby's iPhone since Sun 7:02 AM — check the automation".
 
@@ -200,11 +215,24 @@ Stale-upload alerts (36 h default) always show in the web app, plus optional per
 - **Push via Apprise:** user enters one or more Apprise URLs (covers Pushover, Gotify, Telegram, Discord, Matrix, etc.); healthvibe ships the `apprise` library.
 - One alert per stale period (re-armed after the next successful upload); a "Send test" button per channel. Run errors reported by the server (e.g. repeated 426/401) use the same channels.
 
+## 6b. "Help, I messed up my Shortcut" page
+
+A web page (linked from Setup, Settings and every Shortcut error notification) that resets everything on the phone and reinstalls from scratch:
+
+1. **Delete the automation:** Shortcuts → Automation → swipe left on the healthvibe automation → Delete.
+2. **Delete the Shortcut:** Shortcuts → long-press **healthvibe** → Delete.
+3. **Delete the saved settings file:** Files → iCloud Drive → Shortcuts → `healthvibe` → delete `hv-config.json` (or the whole folder).
+4. **Reset the token:** "Reset my upload token" button on the page (revokes the current token immediately; uploads from the old Shortcut get `401`). Sync settings and stored data are kept.
+5. **Reinstall:** the page shows **QR code 1** (fresh signed download link).
+6. **Reconfigure:** the page shows **QR code 2** (fresh setup code), then the trigger instructions again.
+
+Optional: Settings → Health → Data Access → Shortcuts to review or reset Health permissions. Each step gets a screenshot (planned, see [shortcut-build.md](shortcut-build.md#screenshots)).
+
 ## 6. Versioning and Shortcut updates
 
 - The Shortcut has a `HV_VERSION` text action at the top (semver, matches the GitHub release tag) and sends it in every request.
-- Server returns `min_shortcut_version` / `latest_shortcut_version` / `latest_shortcut_url` in config.
-  - Below min: server answers `426 Upgrade Required`; Shortcut shows an alert with the download link and stops.
+- Server returns `min_shortcut_version` / `latest_shortcut_version` / `latest_shortcut_url` in config (a signed download link on the user's own server).
+  - Below min: server answers `426 Upgrade Required`; Shortcut shows an alert with the download link and stops. Updated server images bundle the new signed file, so updating = scan QR code 1 again.
   - Below latest: upload continues; a one-line notification suggests updating.
 - Updating = import the new signed file and replace the old one. Config lives in `hv-config.json`, so it survives; the alarm automation must be re-pointed at the new Shortcut if the name changed (keep the name `healthvibe` stable to avoid this).
 - Adding a metric = new block in the master Shortcut → new release + re-sign. The server can list metrics the user's Shortcut version doesn't support yet ("update Shortcut to sync X").
@@ -245,17 +273,19 @@ iOS only imports `.shortcut` files that are signed (AEA archive with an Apple-is
 | HubSign (RoutineHub) via [wynx1123/shortcut-signer](https://github.com/wynx1123/shortcut-signer) | POST the unsigned plist to a third-party service | **Works on Linux, risky.** Depends on an unofficial community service; the Shortcut (with server URL patterns) goes to a third party; availability and terms can change. OK for experimenting, not for releases. |
 | [scaxyz/shortcut-signing-server](https://github.com/scaxyz/shortcut-signing-server) | Self-hosted HTTP wrapper | Still runs `shortcuts sign` underneath, so it needs a Mac. |
 
-Decision: the friend-signed `.shortcut` file on GitHub releases is the **only** distribution channel. Publishing an iCloud link is a **deferred option** (not approved; it would point at Toby's iCloud account). Revisit shortcut-sign or the iCloud link only if the friend's Mac becomes unavailable.
+Decision: the friend-signed `.shortcut` file is bundled in each release and Docker image and **served by each healthvibe server** (QR code 1); it's also attached to the GitHub release for reference. That's the only distribution channel. Publishing an iCloud link is a **deferred option** (not approved; it would point at Toby's iCloud account). Revisit shortcut-sign or the iCloud link only if the friend's Mac becomes unavailable.
 
 ## 10. Security
 
 - Upload tokens: random 256-bit, prefix `hvu_`, stored hashed (argon2/sha256), scoped `upload` only (can't read data back, can't use the MCP), one per user (single device), revocable/replaceable in the web app, never shown.
-- QR holds only URL + one-time setup code (10 min, single use). Screenshots of an old QR are useless.
+- QR code 2 holds only URL + one-time setup code (~10 min, single use, replaced on every page load). Screenshots of an old QR are useless.
+- QR code 1 is a short-lived signed download URL (15 min) or requires login; the file holds no secrets anyway.
+- Settings can only be changed in the web UI (logged-in session + CSRF); the upload token cannot change settings.
 - HTTPS only (via Pangolin). Server refuses plain HTTP in production config.
 - Server enforces enabled metrics and per-user isolation; ingest can only write to the token's user.
 - Rate limits on claim, config and ingest; request size cap (`max_request_bytes`).
 - The signed Shortcut contains **no** secrets or server URLs; it's identical for every user. `hv-config.json` in iCloud Drive holds the token — documented, and users can revoke if the phone or iCloud account is lost.
-- Shortcut is readable by anyone (open the actions) so users can verify exactly what it reads and sends.
+- Shortcut is readable by anyone (open the actions) and [shortcut-build.md](shortcut-build.md) lists every action, so users can verify exactly what it reads and sends, or build their own.
 
 ## 11. Shortcut limits to design around
 
@@ -270,15 +300,19 @@ Decision: the friend-signed `.shortcut` file on GitHub releases is the **only** 
 
 ## 12. Resolved decisions (Nov 3, 2026)
 
+- **Sync settings:** web UI only; must be chosen before any QR code is shown; the Shortcut has no metric or trigger menus (§2a, §3.3).
+- **Onboarding:** two QR codes — 1 installs from the healthvibe server, 2 configures with a one-time code (~10 min, new each page load) (§2a).
+- **Distribution:** signed file bundled in the release/image and served by the user's server; "Build it yourself" guide; iCloud link deferred (§9).
+- **Recovery:** "Help, I messed up my Shortcut" page (§6b).
+- **Trigger:** chosen and explained in the web UI (§6a).
 - **Devices:** one device per user, single upload token (§3.4).
 - **Raw upload JSON:** deleted once parsed (§4).
 - **Run notifications:** per-user setting, Always or Only on errors; default Only on errors (§3.2).
-- **Distribution:** signed file on GitHub releases only; iCloud link deferred (§9).
 - **Sleep score:** fixed v1 formula (§8).
 - **No-upload warning:** 36 h, in web app plus per-user email (SMTP) / push (ntfy, Apprise) (§6a).
 - **Workouts:** in v1 (§4, metrics.md).
 - **Lookback:** 7 days on first run, 30-day max (§3.2).
-- **First-run metric menu:** short — "Recommended / Everything / Choose on web".
+- **Metric presets in the web UI:** Recommended / Everything / custom.
 
 ## 13. Open questions
 
