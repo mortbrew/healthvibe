@@ -120,7 +120,7 @@ export default function App() {
 
   return (
     <HealthCtx.Provider value={ctx}>
-      <div className="app">
+      <div className={/^\/(account|settings)\//.test(path) ? "app no-tabs" : "app"}>
         <nav className="topnav" aria-label="Primary">
           <span className="brand"><span className="logo" aria-hidden><i style={{ borderColor: "var(--move)" }} /><i style={{ borderColor: "var(--exercise)" }} /><i style={{ borderColor: "var(--stand)" }} /></span>healthvibe</span>
           <div className="topnav-links">{tabs.map(([to, label]) => <Link key={to} to={to} className={active(to) ? "toplink active" : "toplink"}>{label}</Link>)}</div>
