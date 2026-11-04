@@ -42,6 +42,7 @@ export const messages: Record<string, string> = {
   username_taken: "That username or email is already taken.",
   wrong_password_or_unchanged: "Current password is wrong, or the new one is the same as the old one.",
   already_set_up: "This server is already set up. Sign in instead.",
+  handoff_invalid: "This link was already used or has expired. Make a new QR code in healthvibe on your computer.",
   upload_failed: "The upload failed. Try again.",
   missing_file: "Pick an export.zip file first.",
   no_metrics: "Choose at least one thing to sync.",
@@ -129,6 +130,8 @@ export type HaeInfo = {
   received: number;
   max_request_bytes: number;
 };
+export type Handoff = { id: string; link: string; expires_at: string; public_url_set: boolean };
+export type HandoffStatus = { claimed: boolean; expired: boolean; claimed_at: string | null; expires_at: string };
 export type HaeToken = { token: string; url: string; public_url_set: boolean; header: string };
 
 export type Widget = {

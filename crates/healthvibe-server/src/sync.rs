@@ -42,6 +42,10 @@ pub fn routes() -> Router<AppState> {
         .route("/sync/hae", get(hae_info))
         .route("/sync/hae/token", post(hae_token))
         .route("/me/onboarding", put(onboarding))
+        // Phone handoff (QR code → copy page on the iPhone).
+        .route("/sync/hae/handoff", post(handoff_create))
+        .route("/sync/hae/handoff/{id}", get(handoff_status))
+        .route("/handoff/claim", post(handoff_claim))
         .route("/ingest/hae", post(hae_ingest).layer(DefaultBodyLimit::disable()))
 }
 
@@ -388,5 +392,64 @@ async fn hae_ingest(
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "bad_json", "detail": e })),
         )),
+    }
+}
+
+// ------------------------------------------------------------ phone handoff
+
+const HANDOFFS_PER_10_MIN: u32 = 10;
+
+async fn handoff_create(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+    if !allow(format!("handoff:{}", u.id), HANDOFFS_PER_10_MIN, Duration::from_secs(600)) {
+        return Err(too_many());
+    }
+    let n = healthvibe_core::handoff::create(&st.db, u.id).await?;
+    let (server, public_url_set) = server_url(&st, &h);
+    let link = format!("{}/h/{}", server.trim_end_matches('/'), n.code);
+    Ok(Json(json!({
+        "id": n.id, "link": link, "expires_at": n.expires_at, "public_url_set": public_url_set,
+    })))
+}
+
+async fn handoff_status(
+    State(st): State<AppState>,
+    User(u): User,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult {
+    match healthvibe_core::handoff::status(&st.db, u.id, &id).await? {
+        Some(s) => Ok(Json(json!(s))),
+        None => Err(ApiError(StatusCode::NOT_FOUND, "not_found")),
+    }
+}
+
+#[derive(Deserialize)]
+struct HandoffIn {
+    code: String,
+}
+
+async fn handoff_claim(
+    State(st): State<AppState>,
+    ClientIp(ip): ClientIp,
+    h: HeaderMap,
+    body: Bytes,
+) -> ApiResult<([(header::HeaderName, &'static str); 1], Json<Value>)> {
+    if !allow(format!("handoff-claim:{ip}"), CLAIMS_PER_10_MIN, Duration::from_secs(600)) {
+        return Err(too_many());
+    }
+    let b: HandoffIn = serde_json::from_slice(&body).map_err(|_| bad("bad_json"))?;
+    use healthvibe_core::handoff::Claim;
+    match healthvibe_core::handoff::claim(&st.db, b.code.trim()).await? {
+        Claim::Ok(uid, token) => {
+            tracing::info!(user = uid, "phone handoff opened; new health auto export token");
+            let (url, public_url_set) = hae_url(&st, &h);
+            Ok((
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(json!({
+                    "token": token, "url": url, "public_url_set": public_url_set,
+                    "header": hae::TOKEN_HEADER,
+                })),
+            ))
+        }
+        Claim::Invalid => Err(ApiError(StatusCode::GONE, "handoff_invalid")),
     }
 }

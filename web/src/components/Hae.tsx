@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { api, explain, HaeInfo, HaeToken } from "../api";
+import { useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
+import { api, explain, Handoff, HandoffStatus, HaeInfo, HaeToken } from "../api";
 import { Link } from "../router";
 
 export const SPONSORS_URL = "https://github.com/sponsors/mortbrew";
@@ -16,18 +17,152 @@ export const useHae = (pollMs?: number) => {
   return { info, reload };
 };
 
+/** True on phones / narrow windows. */
+export const useNarrow = () => {
+  const q = "(max-width: 700px)";
+  const [n, setN] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const on = () => setN(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  return n;
+};
+
+/** Copy text; falls back to execCommand on a selected field (older iOS / http). */
+async function copyText(value: string, field: HTMLInputElement | null): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  if (!field) return false;
+  field.focus();
+  field.select();
+  field.setSelectionRange(0, value.length);
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  }
+}
+
+function useCopy(value: string) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<"idle" | "copied" | "manual">("idle");
+  const copy = async () => {
+    const ok = await copyText(value, ref.current);
+    if (!ok) {
+      // Leave the text selected so it can be copied from the iOS menu.
+      ref.current?.focus();
+      ref.current?.select();
+    }
+    setState(ok ? "copied" : "manual");
+    if (ok) setTimeout(() => setState("idle"), 2000);
+  };
+  return { ref, state, copy };
+}
+
 function Copy({ label, value }: { label: string; value: string }) {
-  const [done, setDone] = useState(false);
+  const { ref, state, copy } = useCopy(value);
   return (
     <div className="copyrow">
       <span className="muted small">{label}</span>
-      <code className="copyval">{value}</code>
-      <button
-        className="small"
-        onClick={() => navigator.clipboard?.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); })}
-      >
-        {done ? "Copied" : "Copy"}
+      <input ref={ref} readOnly className="copyval" value={value} onFocus={(e) => e.currentTarget.select()} />
+      <button className="small" onClick={copy}>
+        {state === "copied" ? "Copied" : state === "manual" ? "Selected" : "Copy"}
       </button>
+    </div>
+  );
+}
+
+/** Big tap target for phones: one per field, in the order Health Auto Export asks. */
+function BigCopy({ n, label, hint, value, display }: { n: number; label: string; hint: string; value: string; display?: string }) {
+  const { ref, state, copy } = useCopy(value);
+  return (
+    <div className={`bigcopy ${state}`}>
+      <div className="bigcopy-head">
+        <span className="stepnum">{n}</span>
+        <div>
+          <b>{label}</b>
+          <div className="muted small">{hint}</div>
+        </div>
+      </div>
+      <input ref={ref} readOnly className="copyval" value={value} aria-label={label}
+        onFocus={(e) => e.currentTarget.select()} title={display ?? value} />
+      <button className="bigbtn" onClick={copy}>
+        {state === "copied" ? "✓ Copied" : state === "manual" ? "Text selected: tap Copy" : `Copy ${label === "URL" ? "URL" : label.toLowerCase()}`}
+      </button>
+    </div>
+  );
+}
+
+export function PhoneCopy({ url, token }: { url: string; token: string }) {
+  return (
+    <div className="phonecopy">
+      <BigCopy n={1} label="URL" hint="Paste into URL in the REST API automation." value={url} />
+      <BigCopy n={2} label="Header key" hint="Headers → Add Header → Key." value="Authorization" />
+      <BigCopy n={3} label="Header value" hint="Same header → Value." value={`Bearer ${token}`} />
+    </div>
+  );
+}
+
+/** Desktop: QR code that opens a one-time copy page on the iPhone. */
+function PhoneHandoffQR({ hasToken, onClaimed }: { hasToken: boolean; onClaimed?: () => void }) {
+  const [h, setH] = useState<Handoff | null>(null);
+  const [svg, setSvg] = useState("");
+  const [st, setSt] = useState<HandoffStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const start = async () => {
+    if (hasToken && !confirm("Opening the link on your phone makes a new token. The old one stops working, so update the header in Health Auto Export too.")) return;
+    setErr(null);
+    setSt(null);
+    try {
+      const n = await api<Handoff>("/sync/hae/handoff", { method: "POST" });
+      setSvg(await QRCode.toString(n.link, { type: "svg", margin: 1, errorCorrectionLevel: "M" }));
+      setH(n);
+    } catch (e) {
+      setErr(explain(e));
+    }
+  };
+  useEffect(() => {
+    if (!h || st?.claimed || st?.expired) return;
+    const t = setInterval(async () => {
+      const s = await api<HandoffStatus>(`/sync/hae/handoff/${h.id}`).catch(() => null);
+      if (s) setSt(s);
+      if (s?.claimed) onClaimed?.();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [h, st?.claimed, st?.expired]);
+  if (!h)
+    return (
+      <div className="handoff">
+        <p className="muted small">Setting up on this computer? Scan a QR code with your iPhone camera to get big copy buttons on the phone, where Health Auto Export is.</p>
+        {err && <p className="error">{err}</p>}
+        <button onClick={start}>Show QR code for my iPhone</button>
+      </div>
+    );
+  return (
+    <div className="handoff">
+      {st?.claimed ? (
+        <div className="card notice ok">✓ Opened on your phone. Paste the three values into Health Auto Export there.</div>
+      ) : st?.expired ? (
+        <div className="card notice">This QR code expired. <button className="small" onClick={start}>Make a new one</button></div>
+      ) : (
+        <div className="handoff-qr">
+          <div className="qr" dangerouslySetInnerHTML={{ __html: svg }} />
+          <div>
+            <p><b>Scan with your iPhone camera.</b></p>
+            <p className="muted small">The link works once and expires at {new Date(h.expires_at).toLocaleTimeString()}. Opening it makes your upload token and shows it only on the phone.</p>
+            {!h.public_url_set && <p className="error small">HEALTHVIBE_PUBLIC_URL is not set, so the link uses the address of this browser.</p>}
+            <p className="muted small"><span className="pulse" aria-hidden /> Waiting for your phone…</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -35,6 +170,7 @@ function Copy({ label, value }: { label: string; value: string }) {
 /** Create the upload token and show exactly what to paste into Health Auto Export. */
 export function HaeConnect({ onToken }: { onToken?: () => void }) {
   const { info, reload } = useHae();
+  const narrow = useNarrow();
   const [tok, setTok] = useState<HaeToken | null>(null);
   const [err, setErr] = useState<string | null>(null);
   if (!info) return null;
@@ -53,7 +189,8 @@ export function HaeConnect({ onToken }: { onToken?: () => void }) {
   const pubSet = tok?.public_url_set ?? info.public_url_set;
   return (
     <div className="haeconnect">
-      <Copy label="URL" value={url} />
+      {!narrow && !tok && <PhoneHandoffQR hasToken={info.has_token} onClaimed={() => { reload(); onToken?.(); }} />}
+      {narrow && tok ? <PhoneCopy url={url} token={tok.token} /> : <Copy label="URL" value={url} />}
       {!pubSet && (
         <p className="error small">
           HEALTHVIBE_PUBLIC_URL is not set, so this is the address your browser used. Set it to the public HTTPS
@@ -62,8 +199,8 @@ export function HaeConnect({ onToken }: { onToken?: () => void }) {
       )}
       {tok ? (
         <>
-          <Copy label="Header key" value="Authorization" />
-          <Copy label="Header value" value={`Bearer ${tok.token}`} />
+          {!narrow && <Copy label="Header key" value="Authorization" />}
+          {!narrow && <Copy label="Header value" value={`Bearer ${tok.token}`} />}
           <p className="muted small">
             Copy the header value now. It is shown only once. If Health Auto Export won't take an Authorization
             header, use the key <code>{tok.header}</code> with the value <code>{tok.token}</code> instead.

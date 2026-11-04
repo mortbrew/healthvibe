@@ -10,6 +10,7 @@ import Admin from "./pages/Admin";
 import { HaeGuide, HelpIndex, MessedUp, ShortcutGuide } from "./pages/Help";
 import Onboarding from "./pages/Onboarding";
 import BuildGuide from "./pages/Build";
+import HandoffPage from "./pages/Handoff";
 
 type Session = { needs_setup: boolean; user: User | null };
 
@@ -42,6 +43,8 @@ export default function App() {
     watchSystem(() => prefs.current ?? { mode: "system", light: "daylight", dark: "midnight" });
   }, []);
 
+  // Phone handoff link: works without a session.
+  if (path.startsWith("/h/")) return <HandoffPage code={path.slice(3)} />;
   if (error) return <Centered><p>Can't reach the healthvibe server.</p></Centered>;
   if (!session) return <Centered><p className="muted">Loading…</p></Centered>;
   if (session.needs_setup) return <Centered><Setup onDone={setUser} /></Centered>;

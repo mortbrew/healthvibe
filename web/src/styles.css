@@ -199,3 +199,19 @@ select {
 .trend.up, .trend.down { color: var(--accent); }
 @media (max-width: 1099px) { .dgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dgrid > .widget { grid-column: span 2; } .dgrid > .widget[data-size="1"] { grid-column: span 1; } }
 @media (max-width: 760px) { .dgrid { grid-template-columns: 1fr; } .dgrid > .widget { grid-column: auto; } }
+
+/* Phone handoff + big copy buttons */
+input.copyval { font: inherit; font-family: ui-monospace, monospace; font-size: .85rem; border: 0; color: inherit; min-width: 0; }
+.handoff { margin: .5rem 0 1rem; }
+.handoff-qr { display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap; }
+.handoff-qr .qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 12px; flex: none; }
+.handoff-qr .qr svg { width: 100%; height: 100%; display: block; }
+.phonecopy { display: flex; flex-direction: column; gap: .9rem; margin: 1rem 0; }
+.bigcopy { display: flex; flex-direction: column; gap: .5rem; padding: .9rem; border-radius: 14px; background: var(--surface-2, rgba(127,127,127,.12)); }
+.bigcopy-head { display: flex; gap: .7rem; align-items: center; }
+.bigcopy input.copyval { width: 100%; padding: .55rem .6rem; }
+.bigbtn { width: 100%; min-height: 3.2rem; font-size: 1.1rem; font-weight: 600; border-radius: 12px; }
+.bigcopy.copied .bigbtn { background: var(--stand, #2e9d5b); }
+.handoffpage { max-width: 34rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.haeconnect code { word-break: break-all; }
+.haeconnect, .phonecopy, .bigcopy { min-width: 0; max-width: 100%; }

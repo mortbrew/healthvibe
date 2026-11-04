@@ -6,6 +6,7 @@ pub mod config;
 pub mod dashboards;
 pub mod db;
 pub mod hae;
+pub mod handoff;
 pub mod import;
 pub mod shortcut;
 pub mod stats;
