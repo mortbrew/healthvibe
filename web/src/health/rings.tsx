@@ -1,0 +1,76 @@
+// Fitness-style activity rings (original drawing): thick round caps, dim track, arrows at 12 o'clock.
+export type RingVals = { move: [number, number]; exercise: [number, number]; stand: [number, number] };
+
+function One({ r, w, frac, color, arrow, dim }: { r: number; w: number; frac: number; color: string; arrow?: number; dim?: boolean }) {
+  const c = 2 * Math.PI * r;
+  const f = Math.max(0, frac);
+  return (
+    <g>
+      <circle r={r} fill="none" stroke={color} strokeOpacity={dim ? 0.12 : 0.22} strokeWidth={w} />
+      {f > 0 && (
+        <circle r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round"
+          strokeDasharray={`${c * Math.min(f, 1)} ${c}`} transform="rotate(-90)" />
+      )}
+      {f > 1 && (
+        <circle r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round"
+          strokeDasharray={`${c * Math.min(f - 1, 0.999)} ${c}`} transform="rotate(-90)" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,.6)) brightness(1.15)" }} />
+      )}
+      {arrow !== undefined && w >= 10 && (
+        <g transform={`translate(${w * 0.05},${-r})`} stroke="#000" strokeWidth={w * 0.13} fill="none" strokeLinecap="round" strokeLinejoin="round">
+          {arrow === 0 && <path d={`M${-w * 0.22} 0h${w * 0.44}m${-w * 0.18} ${-w * 0.18}l${w * 0.18} ${w * 0.18}l${-w * 0.18} ${w * 0.18}`} />}
+          {arrow === 1 && <path d={`M${-w * 0.28} ${-w * 0.18}l${w * 0.18} ${w * 0.18}l${-w * 0.18} ${w * 0.18}M${w * 0.02} ${-w * 0.18}l${w * 0.18} ${w * 0.18}l${-w * 0.18} ${w * 0.18}`} />}
+          {arrow === 2 && <path d={`M0 ${w * 0.24}v${-w * 0.46}m${-w * 0.18} ${w * 0.18}l${w * 0.18} ${-w * 0.18}l${w * 0.18} ${w * 0.18}`} />}
+        </g>
+      )}
+    </g>
+  );
+}
+
+export function FitRings({ v, size = 140, dim, label }: { v: RingVals | null; size?: number; dim?: boolean; label?: string }) {
+  const w = size * 0.115, g = size * 0.012;
+  const r1 = size / 2 - w / 2, r2 = r1 - w - g, r3 = r2 - w - g;
+  const f = (p?: [number, number]) => (p && p[1] > 0 ? p[0] / p[1] : 0);
+  return (
+    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label={label ?? "Activity rings"} className="fitrings">
+      <One r={r1} w={w} frac={f(v?.move)} color="var(--move)" arrow={0} dim={dim} />
+      <One r={r2} w={w} frac={f(v?.exercise)} color="var(--exercise)" arrow={1} dim={dim} />
+      <One r={r3} w={w} frac={f(v?.stand)} color="var(--stand)" arrow={2} dim={dim} />
+    </svg>
+  );
+}
+
+export const ringsOf = (d: { move_kcal: number; move_goal: number; exercise_min: number; exercise_goal: number; stand_hours: number; stand_goal: number }): RingVals => ({
+  move: [d.move_kcal, d.move_goal],
+  exercise: [d.exercise_min, d.exercise_goal],
+  stand: [d.stand_hours, d.stand_goal],
+});
+
+/** Original award badge: hexagon medal with diagonal ring-color stripes. */
+export function Badge({ kind, size = 96 }: { kind: string; size?: number }) {
+  const colors: Record<string, [string, string, string]> = {
+    perfect_week: ["var(--move)", "var(--exercise)", "var(--stand)"],
+    move_streak: ["var(--move)", "#ff8a3d", "var(--move)"],
+    record_steps: ["#b18cff", "#7d5cff", "#b18cff"],
+    ten_k: ["#ffd23d", "#ffa63d", "#ffd23d"],
+  };
+  const [a, b, c] = colors[kind] ?? colors.perfect_week;
+  const id = `bd-${kind}`;
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden>
+      <defs>
+        <linearGradient id={id + "m"} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#f6e7a8" /><stop offset=".5" stopColor="#c9a64a" /><stop offset="1" stopColor="#f3dc8c" />
+        </linearGradient>
+        <clipPath id={id + "c"}><path d="M50 12 83 31v38L50 88 17 69V31Z" /></clipPath>
+      </defs>
+      <path d="M50 4 89 27v46L50 96 11 73V27Z" fill={`url(#${id}m)`} />
+      <path d="M50 12 83 31v38L50 88 17 69V31Z" fill="#f4efe4" />
+      <g clipPath={`url(#${id}c)`} strokeWidth="9" fill="none" strokeLinecap="round">
+        <path d="M8 62 92 30" stroke={a} />
+        <path d="M8 74 92 42" stroke={b} />
+        <path d="M8 86 92 54" stroke={c} />
+      </g>
+      <path d="M58 22 44 50h10l-8 26" fill="none" stroke="#fff" strokeWidth="4" strokeLinejoin="round" opacity=".9" />
+    </svg>
+  );
+}

@@ -47,8 +47,14 @@ const MAP: &[(&str, &str)] = &[
     ("vo2_max", "vo2Max"),
     ("atrial_fibrillation_burden", "atrialFibrillationBurden"),
     ("sleep_analysis", "sleepAnalysis"),
-    ("apple_sleeping_wrist_temperature", "appleSleepingWristTemperature"),
-    ("breathing_disturbances", "appleSleepingBreathingDisturbances"),
+    (
+        "apple_sleeping_wrist_temperature",
+        "appleSleepingWristTemperature",
+    ),
+    (
+        "breathing_disturbances",
+        "appleSleepingBreathingDisturbances",
+    ),
     ("respiratory_rate", "respiratoryRate"),
     ("blood_oxygen_saturation", "oxygenSaturation"),
     ("weight_body_mass", "bodyMass"),
@@ -60,10 +66,16 @@ const MAP: &[(&str, &str)] = &[
     ("walking_speed", "walkingSpeed"),
     ("walking_step_length", "walkingStepLength"),
     ("walking_asymmetry_percentage", "walkingAsymmetryPercentage"),
-    ("walking_double_support_percentage", "walkingDoubleSupportPercentage"),
+    (
+        "walking_double_support_percentage",
+        "walkingDoubleSupportPercentage",
+    ),
     ("walking_steadiness", "appleWalkingSteadiness"),
     ("apple_walking_steadiness", "appleWalkingSteadiness"),
-    ("six_minute_walking_test_distance", "sixMinuteWalkTestDistance"),
+    (
+        "six_minute_walking_test_distance",
+        "sixMinuteWalkTestDistance",
+    ),
     ("stair_speed_up", "stairAscentSpeed"),
     ("environmental_audio", "environmentalAudioExposure"),
     ("environmental_audio_exposure", "environmentalAudioExposure"),
@@ -138,7 +150,9 @@ fn fmt(x: f64) -> String {
 }
 
 fn utc(t: DateTime<FixedOffset>) -> String {
-    t.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    t.with_timezone(&Utc)
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string()
 }
 
 fn reading(
@@ -155,7 +169,15 @@ fn reading(
         utc(end),
         source.as_deref().unwrap_or("")
     );
-    Reading { kind, value, unit, start, end, source, key }
+    Reading {
+        kind,
+        value,
+        unit,
+        start,
+        end,
+        source,
+        key,
+    }
 }
 
 fn quantity(m: &sc::Metric, x: f64, units: Option<&str>) -> String {
@@ -171,7 +193,9 @@ fn quantity(m: &sc::Metric, x: f64, units: Option<&str>) -> String {
 
 /// Start/end of one data point: `date` (aggregated bucket or sample time)
 /// or `startDate`/`endDate`.
-fn span(o: &serde_json::Map<String, Value>) -> Option<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
+fn span(
+    o: &serde_json::Map<String, Value>,
+) -> Option<(DateTime<FixedOffset>, DateTime<FixedOffset>)> {
     let start = ts(o.get("startDate")).or_else(|| ts(o.get("date")))?;
     let end = ts(o.get("endDate")).unwrap_or(start);
     (end >= start).then_some((start, end))
@@ -182,7 +206,11 @@ fn sleep_stage(v: &str) -> Option<String> {
     sc::category_value(m, &Value::String(v.into()))
 }
 
-fn sleep(o: &serde_json::Map<String, Value>, src: Option<String>, out: &mut Vec<Reading>) -> Result<(), String> {
+fn sleep(
+    o: &serde_json::Map<String, Value>,
+    src: Option<String>,
+    out: &mut Vec<Reading>,
+) -> Result<(), String> {
     let hk = "HKCategoryTypeIdentifierSleepAnalysis".to_string();
     if let Some(v) = txt(o.get("value")) {
         // Unaggregated: one segment.
@@ -198,12 +226,27 @@ fn sleep(o: &serde_json::Map<String, Value>, src: Option<String>, out: &mut Vec<
     let night = txt(o.get("date")).unwrap_or_else(|| start.format("%Y-%m-%d").to_string());
     let h = |k: &str| num(o.get(k)).unwrap_or(0.0).max(0.0);
     let (core, deep, rem) = (h("core"), h("deep"), h("rem"));
-    let total = if h("totalSleep") > 0.0 { h("totalSleep") } else { h("asleep") };
+    let total = if h("totalSleep") > 0.0 {
+        h("totalSleep")
+    } else {
+        h("asleep")
+    };
     let unspec = (total - core - deep - rem).max(0.0);
     let awake = (((end - start).num_seconds() as f64) / 3600.0 - total).max(0.0);
     let mut t = start;
-    let key = |stage: &str| format!("{hk}\x1faggregated\x1f{night}\x1f{stage}\x1f{}", src.as_deref().unwrap_or(""));
-    for (stage, hours) in [("Core", core), ("Deep", deep), ("REM", rem), ("Asleep", unspec), ("Awake", awake)] {
+    let key = |stage: &str| {
+        format!(
+            "{hk}\x1faggregated\x1f{night}\x1f{stage}\x1f{}",
+            src.as_deref().unwrap_or("")
+        )
+    };
+    for (stage, hours) in [
+        ("Core", core),
+        ("Deep", deep),
+        ("REM", rem),
+        ("Asleep", unspec),
+        ("Awake", awake),
+    ] {
         if hours < 1.0 / 120.0 {
             continue;
         }
@@ -226,7 +269,9 @@ fn sleep(o: &serde_json::Map<String, Value>, src: Option<String>, out: &mut Vec<
 fn metric_points(m: &Value, out: &mut Vec<Reading>, errs: &mut Vec<String>) {
     let name = txt(m.get("name")).unwrap_or_default();
     let units = txt(m.get("units"));
-    let Some(Value::Array(data)) = m.get("data") else { return };
+    let Some(Value::Array(data)) = m.get("data") else {
+        return;
+    };
     let known = metric_for(&name);
     for p in data {
         let Some(o) = p.as_object() else {
@@ -242,44 +287,115 @@ fn metric_points(m: &Value, out: &mut Vec<Reading>, errs: &mut Vec<String>) {
             if name == "blood_pressure" {
                 for (f, t) in [("systolic", "Systolic"), ("diastolic", "Diastolic")] {
                     if let Some(x) = num(o.get(f)) {
-                        out.push(reading(format!("HKQuantityTypeIdentifierBloodPressure{t}"), Some(fmt(x)), Some("mmHg".into()), s, e, src.clone()));
+                        out.push(reading(
+                            format!("HKQuantityTypeIdentifierBloodPressure{t}"),
+                            Some(fmt(x)),
+                            Some("mmHg".into()),
+                            s,
+                            e,
+                            src.clone(),
+                        ));
                     }
                 }
                 return Ok(());
             }
             match known {
                 Some(k) if k.key == "heartRate" => {
-                    let avg = num(o.get("Avg")).or_else(|| num(o.get("qty"))).ok_or("heart_rate: no Avg/qty")?;
-                    out.push(reading(k.hk.into(), Some(quantity(k, avg, None)), Some(k.unit.into()), s, e, src.clone()));
-                    for (f, t) in [("Min", "healthvibe.HeartRateMin"), ("Max", "healthvibe.HeartRateMax")] {
+                    let avg = num(o.get("Avg"))
+                        .or_else(|| num(o.get("qty")))
+                        .ok_or("heart_rate: no Avg/qty")?;
+                    out.push(reading(
+                        k.hk.into(),
+                        Some(quantity(k, avg, None)),
+                        Some(k.unit.into()),
+                        s,
+                        e,
+                        src.clone(),
+                    ));
+                    for (f, t) in [
+                        ("Min", "healthvibe.HeartRateMin"),
+                        ("Max", "healthvibe.HeartRateMax"),
+                    ] {
                         if let Some(x) = num(o.get(f)) {
-                            out.push(reading(t.into(), Some(fmt(x)), Some("count/min".into()), s, e, src.clone()));
+                            out.push(reading(
+                                t.into(),
+                                Some(fmt(x)),
+                                Some("count/min".into()),
+                                s,
+                                e,
+                                src.clone(),
+                            ));
                         }
                     }
                 }
                 Some(k) if k.key == "mindfulSession" => {
                     let mins = num(o.get("qty")).unwrap_or(0.0);
-                    let e2 = if e > s { e } else { s + Duration::seconds((mins * 60.0) as i64) };
-                    out.push(reading(k.hk.into(), Some("HKCategoryValueNotApplicable".into()), None, s, e2, src.clone()));
+                    let e2 = if e > s {
+                        e
+                    } else {
+                        s + Duration::seconds((mins * 60.0) as i64)
+                    };
+                    out.push(reading(
+                        k.hk.into(),
+                        Some("HKCategoryValueNotApplicable".into()),
+                        None,
+                        s,
+                        e2,
+                        src.clone(),
+                    ));
                 }
                 Some(k) if k.key == "appleStandHour" && num(o.get("qty")).unwrap_or(0.0) <= 1.0 => {
                     let stood = num(o.get("qty")).unwrap_or(0.0) > 0.0;
-                    let v = if stood { "HKCategoryValueAppleStandHourStood" } else { "HKCategoryValueAppleStandHourIdle" };
+                    let v = if stood {
+                        "HKCategoryValueAppleStandHourStood"
+                    } else {
+                        "HKCategoryValueAppleStandHourIdle"
+                    };
                     let e2 = if e > s { e } else { s + Duration::hours(1) };
-                    out.push(reading(k.hk.into(), Some(v.into()), None, s, e2, src.clone()));
+                    out.push(reading(
+                        k.hk.into(),
+                        Some(v.into()),
+                        None,
+                        s,
+                        e2,
+                        src.clone(),
+                    ));
                 }
                 Some(k) if k.kind == Kind::Quantity => {
                     let x = num(o.get("qty")).ok_or("no qty")?;
-                    out.push(reading(k.hk.into(), Some(quantity(k, x, units.as_deref())), Some(k.unit.into()), s, e, src.clone()));
+                    out.push(reading(
+                        k.hk.into(),
+                        Some(quantity(k, x, units.as_deref())),
+                        Some(k.unit.into()),
+                        s,
+                        e,
+                        src.clone(),
+                    ));
                 }
                 _ => {
                     // Not mapped yet: keep every number as sent.
-                    let kind = format!("healthvibe.hae.{}", name.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_', ""));
+                    let kind = format!(
+                        "healthvibe.hae.{}",
+                        name.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_', "")
+                    );
                     let mut any = false;
                     for (f, v) in o {
-                        if let Some(x) = num(Some(v)).filter(|_| !matches!(f.as_str(), "date" | "startDate" | "endDate")) {
-                            let kind = if f == "qty" { kind.clone() } else { format!("{kind}.{f}") };
-                            out.push(reading(kind, Some(fmt(x)), units.clone(), s, e, src.clone()));
+                        if let Some(x) = num(Some(v))
+                            .filter(|_| !matches!(f.as_str(), "date" | "startDate" | "endDate"))
+                        {
+                            let kind = if f == "qty" {
+                                kind.clone()
+                            } else {
+                                format!("{kind}.{f}")
+                            };
+                            out.push(reading(
+                                kind,
+                                Some(fmt(x)),
+                                units.clone(),
+                                s,
+                                e,
+                                src.clone(),
+                            ));
                             any = true;
                         }
                     }
@@ -309,11 +425,20 @@ fn workout_type(name: &str) -> String {
             .filter(|w| !w.is_empty())
             .map(|w| {
                 let mut c = w.chars();
-                c.next().map(|f| f.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+                c.next()
+                    .map(|f| f.to_uppercase().chain(c).collect::<String>())
+                    .unwrap_or_default()
             })
             .collect(),
     };
-    format!("HKWorkoutActivityType{}", if base.is_empty() { "Other".into() } else { base })
+    format!(
+        "HKWorkoutActivityType{}",
+        if base.is_empty() {
+            "Other".into()
+        } else {
+            base
+        }
+    )
 }
 
 fn workout(w: &Value) -> Result<Reading, String> {
@@ -362,12 +487,19 @@ pub fn parse(body: &[u8]) -> Result<(Vec<Reading>, Vec<String>), String> {
 const CHUNK: usize = 5000;
 
 /// Parse and store. Err = body isn't JSON of the right shape.
-pub async fn ingest(db: &SqlitePool, user_id: i64, body: &[u8]) -> anyhow::Result<Result<HaeResult, String>> {
+pub async fn ingest(
+    db: &SqlitePool,
+    user_id: i64,
+    body: &[u8],
+) -> anyhow::Result<Result<HaeResult, String>> {
     let (rows, errs) = match parse(body) {
         Ok(x) => x,
         Err(e) => return Ok(Err(e)),
     };
-    let mut res = HaeResult { invalid: errs.len() as u64, ..Default::default() };
+    let mut res = HaeResult {
+        invalid: errs.len() as u64,
+        ..Default::default()
+    };
     res.errors = errs.into_iter().take(5).collect();
     // Commit in chunks so a huge all-metrics batch doesn't hold the write lock
     // for the whole request; re-sends are idempotent, so a partial failure is
@@ -425,22 +557,24 @@ pub async fn ingest(db: &SqlitePool, user_id: i64, body: &[u8]) -> anyhow::Resul
         "UPDATE upload_tokens SET last_upload_at = ?, last_seen_at = ?,
            hae_received = hae_received + ? WHERE user_id = ?",
     )
-        .bind(&now)
-        .bind(&now)
-        .bind(rows.len() as i64)
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    .bind(&now)
+    .bind(&now)
+    .bind(rows.len() as i64)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(Ok(res))
 }
 
 /// Readings received from Health Auto Export with the current token.
 pub async fn received(db: &SqlitePool, user_id: i64) -> anyhow::Result<Option<i64>> {
-    Ok(sqlx::query_scalar("SELECT hae_received FROM upload_tokens WHERE user_id = ?")
-        .bind(user_id)
-        .fetch_optional(db)
-        .await?)
+    Ok(
+        sqlx::query_scalar("SELECT hae_received FROM upload_tokens WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?,
+    )
 }
 
 #[cfg(test)]
@@ -456,14 +590,35 @@ mod tests {
         assert_eq!(get("HKQuantityTypeIdentifierStepCount").len(), 2);
         let w = get("HKQuantityTypeIdentifierBodyMass");
         assert_eq!(w[0].value.as_deref(), Some("81.646627")); // 180 lb
-        assert_eq!(get("HKQuantityTypeIdentifierHeartRate")[0].value.as_deref(), Some("72"));
-        assert_eq!(get("healthvibe.HeartRateMax")[0].value.as_deref(), Some("85"));
-        assert_eq!(get("HKQuantityTypeIdentifierOxygenSaturation")[0].value.as_deref(), Some("0.97"));
+        assert_eq!(
+            get("HKQuantityTypeIdentifierHeartRate")[0].value.as_deref(),
+            Some("72")
+        );
+        assert_eq!(
+            get("healthvibe.HeartRateMax")[0].value.as_deref(),
+            Some("85")
+        );
+        assert_eq!(
+            get("HKQuantityTypeIdentifierOxygenSaturation")[0]
+                .value
+                .as_deref(),
+            Some("0.97")
+        );
         let sleep = get("HKCategoryTypeIdentifierSleepAnalysis");
-        assert!(sleep.iter().any(|r| r.value.as_deref() == Some("HKCategoryValueSleepAnalysisAsleepDeep")));
-        assert!(sleep.iter().any(|r| r.value.as_deref() == Some("HKCategoryValueSleepAnalysisInBed")));
-        assert_eq!(get("HKWorkoutActivityTypeRunning")[0].value.as_deref(), Some("30"));
-        assert_eq!(get("HKQuantityTypeIdentifierBloodPressureSystolic").len(), 1);
+        assert!(sleep
+            .iter()
+            .any(|r| r.value.as_deref() == Some("HKCategoryValueSleepAnalysisAsleepDeep")));
+        assert!(sleep
+            .iter()
+            .any(|r| r.value.as_deref() == Some("HKCategoryValueSleepAnalysisInBed")));
+        assert_eq!(
+            get("HKWorkoutActivityTypeRunning")[0].value.as_deref(),
+            Some("30")
+        );
+        assert_eq!(
+            get("HKQuantityTypeIdentifierBloodPressureSystolic").len(),
+            1
+        );
         assert_eq!(get("healthvibe.hae.toothbrushing").len(), 1);
     }
 
@@ -471,7 +626,12 @@ mod tests {
     fn aggregated_sleep_totals() {
         let body = br#"{"data":{"metrics":[{"name":"sleep_analysis","units":"hr","data":[{"date":"2026-10-06","totalSleep":7.5,"asleep":7.5,"core":4,"deep":1.5,"rem":2,"sleepStart":"2026-10-05 23:00:00 -0400","sleepEnd":"2026-10-06 07:00:00 -0400","inBed":8.25,"inBedStart":"2026-10-05 22:45:00 -0400","inBedEnd":"2026-10-06 07:00:00 -0400","source":"Synthetic Watch"}]}]}}"#;
         let (rows, _) = parse(body).unwrap();
-        let mins = |v: &str| rows.iter().filter(|r| r.value.as_deref() == Some(v)).map(|r| (r.end - r.start).num_minutes()).sum::<i64>();
+        let mins = |v: &str| {
+            rows.iter()
+                .filter(|r| r.value.as_deref() == Some(v))
+                .map(|r| (r.end - r.start).num_minutes())
+                .sum::<i64>()
+        };
         assert_eq!(mins("HKCategoryValueSleepAnalysisAsleepCore"), 240);
         assert_eq!(mins("HKCategoryValueSleepAnalysisAsleepDeep"), 90);
         assert_eq!(mins("HKCategoryValueSleepAnalysisAsleepREM"), 120);

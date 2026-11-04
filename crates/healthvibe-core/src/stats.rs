@@ -168,6 +168,8 @@ pub async fn activity(
     .fetch_optional(db)
     .await?;
     let (gm, ge, gs) = g.unwrap_or((None, None, None));
+    let (om, oe, os) = crate::profile::goal_overrides(db, user_id).await?;
+    let (gm, ge, gs) = (om.or(gm), oe.or(ge), os.or(gs));
     let rings = Rings {
         date: date.clone(),
         move_kcal: on(&energy, &date),

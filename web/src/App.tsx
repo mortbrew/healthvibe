@@ -40,7 +40,7 @@ export default function App() {
         }
       })
       .catch(() => setError(true));
-    watchSystem(() => prefs.current ?? { mode: "system", light: "daylight", dark: "midnight" });
+    watchSystem(() => prefs.current ?? { mode: "system", light: "health", dark: "health" });
   }, []);
 
   // Phone handoff link: works without a session.

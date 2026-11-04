@@ -89,16 +89,36 @@ async fn admin(app: &Router) -> String {
     c.unwrap()
 }
 
-
 async fn user(app: &Router, admin: &str, name: &str) -> String {
-    let (s, _, _) = call(app, "POST", "/api/v1/admin/users", Auth::Cookie(admin),
-        Some(json!({"username": name, "temporary_password": "temporary pass"}).to_string())).await;
+    let (s, _, _) = call(
+        app,
+        "POST",
+        "/api/v1/admin/users",
+        Auth::Cookie(admin),
+        Some(json!({"username": name, "temporary_password": "temporary pass"}).to_string()),
+    )
+    .await;
     assert_eq!(s, 201);
-    let (_, _, c) = call(app, "POST", "/api/v1/login", Auth::None,
-        Some(json!({"username": name, "password": "temporary pass"}).to_string())).await;
+    let (_, _, c) = call(
+        app,
+        "POST",
+        "/api/v1/login",
+        Auth::None,
+        Some(json!({"username": name, "password": "temporary pass"}).to_string()),
+    )
+    .await;
     let c = c.unwrap();
-    let (s, _, c2) = call(app, "POST", "/api/v1/me/password", Auth::Cookie(&c),
-        Some(json!({"current": "temporary pass", "new": format!("{name}'s own password")}).to_string())).await;
+    let (s, _, c2) = call(
+        app,
+        "POST",
+        "/api/v1/me/password",
+        Auth::Cookie(&c),
+        Some(
+            json!({"current": "temporary pass", "new": format!("{name}'s own password")})
+                .to_string(),
+        ),
+    )
+    .await;
     assert_eq!(s, 200);
     c2.unwrap_or(c)
 }
@@ -108,8 +128,14 @@ fn code_of(link: &str) -> String {
 }
 
 async fn claim(app: &Router, code: &str) -> (StatusCode, Value) {
-    let (s, v, _) = call(app, "POST", "/api/v1/handoff/claim", Auth::None,
-        Some(json!({ "code": code }).to_string())).await;
+    let (s, v, _) = call(
+        app,
+        "POST",
+        "/api/v1/handoff/claim",
+        Auth::None,
+        Some(json!({ "code": code }).to_string()),
+    )
+    .await;
     (s, v)
 }
 
@@ -120,20 +146,43 @@ async fn handoff_single_use_and_token_works() {
     // needs a session
     let (s, _, _) = call(&app, "POST", "/api/v1/sync/hae/handoff", Auth::None, None).await;
     assert_eq!(s, 401);
-    let (s, v, _) = call(&app, "POST", "/api/v1/sync/hae/handoff", Auth::Cookie(&c), None).await;
+    let (s, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/sync/hae/handoff",
+        Auth::Cookie(&c),
+        None,
+    )
+    .await;
     assert_eq!(s, 200, "{v}");
     let link = v["link"].as_str().unwrap();
     assert!(link.starts_with("https://health.example.test/h/"), "{link}");
-    assert!(v.get("token").is_none(), "no token before the phone opens it");
+    assert!(
+        v.get("token").is_none(),
+        "no token before the phone opens it"
+    );
     let id = v["id"].as_str().unwrap().to_string();
     let code = code_of(link);
     // nothing about the code or a token is stored in plain text
-    let stored: String = sqlx::query_scalar("SELECT code_hash FROM handoffs").fetch_one(&db).await.unwrap();
+    let stored: String = sqlx::query_scalar("SELECT code_hash FROM handoffs")
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_ne!(stored, code);
-    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM upload_tokens").fetch_one(&db).await.unwrap();
+    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM upload_tokens")
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_eq!(tokens, 0, "token is minted on claim, not on create");
 
-    let (_, st, _) = call(&app, "GET", &format!("/api/v1/sync/hae/handoff/{id}"), Auth::Cookie(&c), None).await;
+    let (_, st, _) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/sync/hae/handoff/{id}"),
+        Auth::Cookie(&c),
+        None,
+    )
+    .await;
     assert_eq!(st["claimed"], false);
 
     let (s, v) = claim(&app, &code).await;
@@ -142,7 +191,14 @@ async fn handoff_single_use_and_token_works() {
     assert!(tok.starts_with("hvu_"));
     assert_eq!(v["url"], "https://health.example.test/api/v1/ingest/hae");
     // the revealed token uploads
-    let (s, _, _) = call(&app, "POST", "/api/v1/ingest/hae", Auth::Bearer(&tok), Some(r#"{"data":{"metrics":[]}}"#.into())).await;
+    let (s, _, _) = call(
+        &app,
+        "POST",
+        "/api/v1/ingest/hae",
+        Auth::Bearer(&tok),
+        Some(r#"{"data":{"metrics":[]}}"#.into()),
+    )
+    .await;
     assert_eq!(s, 200);
 
     // second open: friendly error, no token
@@ -154,12 +210,27 @@ async fn handoff_single_use_and_token_works() {
     let (s, _) = claim(&app, "zz").await;
     assert_eq!(s, 410);
 
-    let (_, st, _) = call(&app, "GET", &format!("/api/v1/sync/hae/handoff/{id}"), Auth::Cookie(&c), None).await;
+    let (_, st, _) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/sync/hae/handoff/{id}"),
+        Auth::Cookie(&c),
+        None,
+    )
+    .await;
     assert_eq!(st["claimed"], true, "{st}");
-    assert!(!st.to_string().contains("hvu_"), "status never carries the token");
+    assert!(
+        !st.to_string().contains("hvu_"),
+        "status never carries the token"
+    );
     // a token is never kept in plain text
-    let leaked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM upload_tokens WHERE secret_hash LIKE '%' || ? || '%'")
-        .bind(tok.rsplit('_').next().unwrap()).fetch_one(&db).await.unwrap();
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM upload_tokens WHERE secret_hash LIKE '%' || ? || '%'",
+    )
+    .bind(tok.rsplit('_').next().unwrap())
+    .fetch_one(&db)
+    .await
+    .unwrap();
     assert_eq!(leaked, 0);
 }
 
@@ -167,21 +238,48 @@ async fn handoff_single_use_and_token_works() {
 async fn handoff_expires_and_new_one_replaces_old() {
     let (app, db) = app().await;
     let c = admin(&app).await;
-    let (_, v, _) = call(&app, "POST", "/api/v1/sync/hae/handoff", Auth::Cookie(&c), None).await;
+    let (_, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/sync/hae/handoff",
+        Auth::Cookie(&c),
+        None,
+    )
+    .await;
     let old = code_of(v["link"].as_str().unwrap());
-    let (_, v, _) = call(&app, "POST", "/api/v1/sync/hae/handoff", Auth::Cookie(&c), None).await;
+    let (_, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/sync/hae/handoff",
+        Auth::Cookie(&c),
+        None,
+    )
+    .await;
     let code = code_of(v["link"].as_str().unwrap());
     let id = v["id"].as_str().unwrap().to_string();
     // the older unopened link stopped working
     assert_eq!(claim(&app, &old).await.0, 410);
     // expire the current one
-    sqlx::query("UPDATE handoffs SET expires_at = '2000-01-01T00:00:00Z'").execute(&db).await.unwrap();
-    let (_, st, _) = call(&app, "GET", &format!("/api/v1/sync/hae/handoff/{id}"), Auth::Cookie(&c), None).await;
+    sqlx::query("UPDATE handoffs SET expires_at = '2000-01-01T00:00:00Z'")
+        .execute(&db)
+        .await
+        .unwrap();
+    let (_, st, _) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/sync/hae/handoff/{id}"),
+        Auth::Cookie(&c),
+        None,
+    )
+    .await;
     assert_eq!(st["expired"], true, "{st}");
     let (s, v) = claim(&app, &code).await;
     assert_eq!(s, 410);
     assert!(v.get("token").is_none());
-    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM upload_tokens").fetch_one(&db).await.unwrap();
+    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM upload_tokens")
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_eq!(tokens, 0);
 }
 
@@ -190,17 +288,44 @@ async fn handoff_is_per_user() {
     let (app, db) = app().await;
     let a = admin(&app).await;
     let b = user(&app, &a, "sam@example.test").await;
-    let (_, v, _) = call(&app, "POST", "/api/v1/sync/hae/handoff", Auth::Cookie(&b), None).await;
+    let (_, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/sync/hae/handoff",
+        Auth::Cookie(&b),
+        None,
+    )
+    .await;
     let code = code_of(v["link"].as_str().unwrap());
     let id = v["id"].as_str().unwrap().to_string();
     // another user can't see its status
-    let (s, _, _) = call(&app, "GET", &format!("/api/v1/sync/hae/handoff/{id}"), Auth::Cookie(&a), None).await;
+    let (s, _, _) = call(
+        &app,
+        "GET",
+        &format!("/api/v1/sync/hae/handoff/{id}"),
+        Auth::Cookie(&a),
+        None,
+    )
+    .await;
     assert_eq!(s, 404);
     // a's own handoff doesn't cancel b's
-    call(&app, "POST", "/api/v1/sync/hae/handoff", Auth::Cookie(&a), None).await;
+    call(
+        &app,
+        "POST",
+        "/api/v1/sync/hae/handoff",
+        Auth::Cookie(&a),
+        None,
+    )
+    .await;
     let (s, v) = claim(&app, &code).await;
     assert_eq!(s, 200, "{v}");
-    let uid: i64 = sqlx::query_scalar("SELECT user_id FROM upload_tokens").fetch_one(&db).await.unwrap();
-    let sam: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'sam@example.test'").fetch_one(&db).await.unwrap();
+    let uid: i64 = sqlx::query_scalar("SELECT user_id FROM upload_tokens")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    let sam: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'sam@example.test'")
+        .fetch_one(&db)
+        .await
+        .unwrap();
     assert_eq!(uid, sam, "token belongs to the user who made the link");
 }

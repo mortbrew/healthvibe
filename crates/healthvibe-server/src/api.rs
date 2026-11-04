@@ -18,7 +18,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use healthvibe_core::{auth, dashboards, import, stats};
+use healthvibe_core::{auth, awards as aw, browse, dashboards, import, profile, stats};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
@@ -47,6 +47,18 @@ pub fn routes() -> Router<AppState> {
         .route("/dashboard/body", get(body))
         .route("/metrics", get(metrics))
         .route("/series", get(series))
+        .route("/browse", get(browse_list))
+        .route("/records", get(records))
+        .route("/hourly", get(hourly))
+        .route("/awards", get(awards))
+        .route("/awards/apple/{key}", put(set_apple_award))
+        .route("/me/awards", put(set_awards_enabled))
+        .route("/profile", get(get_profile).put(put_profile))
+        .route("/me/export.csv", get(export_csv))
+        .route("/me/data", axum::routing::delete(delete_data))
+        .route("/me/sessions/others", axum::routing::delete(revoke_others))
+        .route("/rings", get(rings))
+        .route("/pinned", get(get_pinned).put(put_pinned))
         .route("/dashboards", get(list_dashboards).post(create_dashboard))
         .route(
             "/dashboards/{id}",
@@ -211,8 +223,8 @@ struct Theme {
     dark: String,
 }
 
-const LIGHT: &[&str] = &["daylight", "paper", "mint"];
-const DARK: &[&str] = &["midnight", "fitness", "graphite"];
+const LIGHT: &[&str] = &["health", "daylight", "paper", "mint"];
+const DARK: &[&str] = &["health", "midnight", "fitness", "graphite"];
 
 async fn set_theme(State(st): State<AppState>, User(u): User, Json(t): Json<Theme>) -> ApiResult {
     if !["system", "light", "dark"].contains(&t.mode.as_str())
@@ -563,4 +575,312 @@ async fn delete_dashboard(
         return Err(not_found());
     }
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Every metric the user has, with its Browse category and latest value.
+async fn browse_list(State(st): State<AppState>, User(u): User) -> ApiResult {
+    let latest = browse::latest(&st.db, u.id).await?;
+    let out: Vec<Value> = dashboards::metrics(&st.db, u.id)
+        .await?
+        .into_iter()
+        .map(|m| {
+            let l = latest.iter().find(|l| l.0 == m.metric);
+            json!({ "metric": m.metric, "name": m.name, "unit": m.unit, "count": m.count,
+                    "first": m.first, "last": m.last, "agg": m.agg,
+                    "category": browse::category(&m.metric),
+                    "latest_value": l.and_then(|l| l.1.clone()), "latest_at": l.and_then(|l| l.2.clone()) })
+        })
+        .collect();
+    Ok(Json(json!({ "metrics": out })))
+}
+
+#[derive(Deserialize)]
+struct RecordsQuery {
+    metric: String,
+    before: Option<i64>,
+    limit: Option<i64>,
+}
+
+async fn records(
+    State(st): State<AppState>,
+    User(u): User,
+    Query(q): Query<RecordsQuery>,
+) -> ApiResult {
+    let limit = q.limit.unwrap_or(50).clamp(1, browse::MAX_PAGE);
+    let recs = browse::records(&st.db, u.id, &q.metric, q.before, limit + 1).await?;
+    let more = recs.len() as i64 > limit;
+    let recs: Vec<_> = recs.into_iter().take(limit as usize).collect();
+    let next = if more {
+        recs.last().map(|r| r.id)
+    } else {
+        None
+    };
+    Ok(Json(json!({ "records": recs, "next": next })))
+}
+
+async fn get_pinned(State(st): State<AppState>, User(u): User) -> ApiResult {
+    Ok(Json(
+        json!({ "pinned": browse::pinned(&st.db, u.id).await? }),
+    ))
+}
+
+#[derive(Deserialize)]
+struct PinnedBody {
+    pinned: Vec<String>,
+}
+
+async fn put_pinned(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(b): Json<PinnedBody>,
+) -> ApiResult {
+    if b.pinned.len() > browse::MAX_PINNED || b.pinned.iter().any(|m| m.is_empty() || m.len() > 200)
+    {
+        return Err(bad("invalid_pinned"));
+    }
+    browse::set_pinned(&st.db, u.id, &b.pinned).await?;
+    Ok(Json(
+        json!({ "pinned": browse::pinned(&st.db, u.id).await? }),
+    ))
+}
+
+#[derive(Deserialize)]
+struct HourlyQuery {
+    metric: String,
+    date: Option<String>,
+}
+
+async fn hourly(
+    State(st): State<AppState>,
+    User(u): User,
+    Query(q): Query<HourlyQuery>,
+) -> ApiResult {
+    let date = match q.date {
+        Some(d) if chrono_ok(&d) => Some(d),
+        Some(_) => return Err(bad("invalid_date")),
+        None => sqlx::query_scalar::<_, Option<String>>(
+            "SELECT substr(MAX(local_start), 1, 10) FROM readings WHERE user_id = ? AND type = ?",
+        )
+        .bind(u.id)
+        .bind(&q.metric)
+        .fetch_one(&st.db)
+        .await
+        .map_err(anyhow::Error::from)?,
+    };
+    let values = match &date {
+        Some(d) => browse::hourly(&st.db, u.id, &q.metric, d).await?,
+        None => vec![0.0; 24],
+    };
+    let unit: Option<String> = sqlx::query_scalar(
+        "SELECT unit FROM readings WHERE user_id = ? AND type = ? AND unit IS NOT NULL GROUP BY unit ORDER BY COUNT(*) DESC LIMIT 1",
+    ).bind(u.id).bind(&q.metric).fetch_optional(&st.db).await.map_err(anyhow::Error::from)?.flatten();
+    Ok(Json(
+        json!({ "metric": q.metric, "date": date, "unit": unit, "agg": dashboards::default_agg(&q.metric), "values": values }),
+    ))
+}
+
+async fn awards(State(st): State<AppState>, User(u): User) -> ApiResult {
+    let manual: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT key, earned_date FROM apple_awards WHERE user_id = ?")
+            .bind(u.id)
+            .fetch_all(&st.db)
+            .await?;
+    let apple: Vec<Value> = aw::APPLE_ONLY
+        .iter()
+        .map(|(k, n, d)| {
+            let m = manual.iter().find(|m| m.0 == *k);
+            json!({ "key": k, "name": n, "description": d, "earned": m.is_some(), "earned_date": m.and_then(|m| m.1.clone()) })
+        })
+        .collect();
+    if !u.awards_enabled {
+        return Ok(Json(
+            json!({ "enabled": false, "awards": [], "apple_only": apple }),
+        ));
+    }
+    Ok(Json(
+        json!({ "enabled": true, "awards": aw::refresh(&st.db, u.id).await?, "apple_only": apple }),
+    ))
+}
+
+#[derive(Deserialize)]
+struct AppleAward {
+    earned: bool,
+    date: Option<String>,
+}
+
+async fn set_apple_award(
+    State(st): State<AppState>,
+    User(u): User,
+    Path(key): Path<String>,
+    Json(b): Json<AppleAward>,
+) -> ApiResult {
+    if !aw::APPLE_ONLY.iter().any(|a| a.0 == key) {
+        return Err(ApiError(StatusCode::NOT_FOUND, "not_found"));
+    }
+    let date = b.date.filter(|d| !d.is_empty());
+    if date.as_deref().is_some_and(|d| !chrono_ok(d)) {
+        return Err(bad("invalid_date"));
+    }
+    if b.earned {
+        sqlx::query("INSERT INTO apple_awards (user_id, key, earned_date) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET earned_date = excluded.earned_date")
+            .bind(u.id).bind(&key).bind(&date).execute(&st.db).await?;
+    } else {
+        sqlx::query("DELETE FROM apple_awards WHERE user_id = ? AND key = ?")
+            .bind(u.id)
+            .bind(&key)
+            .execute(&st.db)
+            .await?;
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct Enabled {
+    enabled: bool,
+}
+
+async fn set_awards_enabled(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(b): Json<Enabled>,
+) -> ApiResult {
+    sqlx::query("UPDATE users SET awards_enabled = ? WHERE id = ?")
+        .bind(b.enabled)
+        .bind(u.id)
+        .execute(&st.db)
+        .await?;
+    if b.enabled {
+        // Full recompute on enable.
+        sqlx::query("DELETE FROM awards_state WHERE user_id = ?")
+            .bind(u.id)
+            .execute(&st.db)
+            .await?;
+        aw::refresh(&st.db, u.id).await?;
+    }
+    Ok(Json(json!({ "user": auth::get_user(&st.db, u.id).await? })))
+}
+
+async fn get_profile(State(st): State<AppState>, User(u): User) -> ApiResult {
+    Ok(Json(
+        json!({ "profile": profile::get(&st.db, u.id).await? }),
+    ))
+}
+
+async fn put_profile(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(p): Json<profile::Profile>,
+) -> ApiResult {
+    let p = profile::validate(p).map_err(bad)?;
+    profile::put(&st.db, u.id, &p).await?;
+    Ok(Json(json!({ "profile": p })))
+}
+
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+async fn export_csv(State(st): State<AppState>, User(u): User) -> ApiResult<Response> {
+    type R = (
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+    );
+    let rows: Vec<R> = sqlx::query_as(
+        "SELECT type, value, unit, start_utc, end_utc, source FROM readings WHERE user_id = ? ORDER BY start_utc",
+    ).bind(u.id).fetch_all(&st.db).await?;
+    let mut out = String::from("type,value,unit,start_utc,end_utc,source\n");
+    for r in rows {
+        let f = [
+            r.0,
+            r.1.unwrap_or_default(),
+            r.2.unwrap_or_default(),
+            r.3,
+            r.4,
+            r.5.unwrap_or_default(),
+        ];
+        out.push_str(&f.iter().map(|x| csv_field(x)).collect::<Vec<_>>().join(","));
+        out.push('\n');
+    }
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"healthvibe-export.csv\"".to_string(),
+            ),
+        ],
+        out,
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+struct Confirm {
+    confirm: String,
+}
+
+/// Delete all of this user's health data (readings, goals, imports state, awards). Keeps the account.
+async fn delete_data(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(b): Json<Confirm>,
+) -> ApiResult {
+    if b.confirm != u.username {
+        return Err(bad("confirm_mismatch"));
+    }
+    let mut tx = st.db.begin().await?;
+    for t in [
+        "readings",
+        "activity_goals",
+        "user_awards",
+        "awards_state",
+        "pinned_metrics",
+    ] {
+        sqlx::query(&format!("DELETE FROM {t} WHERE user_id = ?"))
+            .bind(u.id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn revoke_others(State(st): State<AppState>, h: HeaderMap, User(u): User) -> ApiResult {
+    let cur = cookie_token(&h)
+        .map(|t| auth::sha256_hex(&t))
+        .unwrap_or_default();
+    let n = sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+        .bind(u.id)
+        .bind(cur)
+        .execute(&st.db)
+        .await?
+        .rows_affected();
+    Ok(Json(json!({ "revoked": n })))
+}
+
+#[derive(Deserialize)]
+struct RingsQuery {
+    start: String,
+    end: String,
+}
+
+async fn rings(
+    State(st): State<AppState>,
+    User(u): User,
+    Query(q): Query<RingsQuery>,
+) -> ApiResult {
+    if !chrono_ok(&q.start) || !chrono_ok(&q.end) {
+        return Err(bad("invalid_date"));
+    }
+    Ok(Json(
+        json!({ "days": browse::rings(&st.db, u.id, &q.start, &q.end).await? }),
+    ))
 }

@@ -46,7 +46,10 @@ pub fn routes() -> Router<AppState> {
         .route("/sync/hae/handoff", post(handoff_create))
         .route("/sync/hae/handoff/{id}", get(handoff_status))
         .route("/handoff/claim", post(handoff_claim))
-        .route("/ingest/hae", post(hae_ingest).layer(DefaultBodyLimit::disable()))
+        .route(
+            "/ingest/hae",
+            post(hae_ingest).layer(DefaultBodyLimit::disable()),
+        )
 }
 
 // ------------------------------------------------------------ rate limits
@@ -322,7 +325,10 @@ const HAE_UPLOADS_PER_HOUR: u32 = 2000;
 
 fn hae_url(st: &AppState, h: &HeaderMap) -> (String, bool) {
     let (server, set) = server_url(st, h);
-    (format!("{}{}", server.trim_end_matches('/'), hae::PATH), set)
+    (
+        format!("{}{}", server.trim_end_matches('/'), hae::PATH),
+        set,
+    )
 }
 
 async fn hae_info(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
@@ -358,7 +364,11 @@ struct OnboardingIn {
     done: bool,
 }
 
-async fn onboarding(State(st): State<AppState>, User(u): User, Json(b): Json<OnboardingIn>) -> ApiResult {
+async fn onboarding(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(b): Json<OnboardingIn>,
+) -> ApiResult {
     sqlx::query("UPDATE users SET onboarding_done = ? WHERE id = ?")
         .bind(b.done)
         .bind(u.id)
@@ -385,7 +395,12 @@ async fn hae_ingest(
     }
     match hae::ingest(&st.db, d.user_id, &body).await? {
         Ok(r) => {
-            tracing::info!(user = d.user_id, accepted = r.accepted, updated = r.updated, "health auto export upload");
+            tracing::info!(
+                user = d.user_id,
+                accepted = r.accepted,
+                updated = r.updated,
+                "health auto export upload"
+            );
             Ok((StatusCode::OK, Json(json!(r))))
         }
         Err(e) => Ok((
@@ -400,7 +415,11 @@ async fn hae_ingest(
 const HANDOFFS_PER_10_MIN: u32 = 10;
 
 async fn handoff_create(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
-    if !allow(format!("handoff:{}", u.id), HANDOFFS_PER_10_MIN, Duration::from_secs(600)) {
+    if !allow(
+        format!("handoff:{}", u.id),
+        HANDOFFS_PER_10_MIN,
+        Duration::from_secs(600),
+    ) {
         return Err(too_many());
     }
     let n = healthvibe_core::handoff::create(&st.db, u.id).await?;
@@ -433,14 +452,21 @@ async fn handoff_claim(
     h: HeaderMap,
     body: Bytes,
 ) -> ApiResult<([(header::HeaderName, &'static str); 1], Json<Value>)> {
-    if !allow(format!("handoff-claim:{ip}"), CLAIMS_PER_10_MIN, Duration::from_secs(600)) {
+    if !allow(
+        format!("handoff-claim:{ip}"),
+        CLAIMS_PER_10_MIN,
+        Duration::from_secs(600),
+    ) {
         return Err(too_many());
     }
     let b: HandoffIn = serde_json::from_slice(&body).map_err(|_| bad("bad_json"))?;
     use healthvibe_core::handoff::Claim;
     match healthvibe_core::handoff::claim(&st.db, b.code.trim()).await? {
         Claim::Ok(uid, token) => {
-            tracing::info!(user = uid, "phone handoff opened; new health auto export token");
+            tracing::info!(
+                user = uid,
+                "phone handoff opened; new health auto export token"
+            );
             let (url, public_url_set) = hae_url(&st, &h);
             Ok((
                 [(header::CACHE_CONTROL, "no-store")],

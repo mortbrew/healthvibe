@@ -21,11 +21,15 @@ const dark = (bg: string, s1: string, s2: string, border: string, text: string, 
 });
 
 export const LIGHT: Record<string, Palette> = {
+  // Apple Health-style grouped light.
+  health: { name: "Health", vars: light("#f2f2f7", "#ffffff", "#e9e9ef", "#d8d8de", "#000000", "#6c6c70", "#007aff") },
   daylight: { name: "Daylight", vars: light("#f2f2f7", "#ffffff", "#f7f7fa", "#e2e2ea", "#111114", "#5d5d6b", "#0a66e8") },
   paper: { name: "Paper", vars: light("#f6f1e8", "#fffcf6", "#f3ece0", "#e3d9c8", "#2a241c", "#6d6252", "#b4561f") },
   mint: { name: "Mint", vars: light("#eef6f3", "#ffffff", "#f3faf7", "#d4e7df", "#10201a", "#4d6159", "#0f8a63") },
 };
 export const DARK: Record<string, Palette> = {
+  // Apple Fitness/Health-style true black with grouped dark cards.
+  health: { name: "Health", vars: dark("#000000", "#1c1c1e", "#2c2c2e", "#38383a", "#ffffff", "#8e8e93", "#0a84ff") },
   // Sleep Stats-style deep navy.
   midnight: { name: "Midnight", vars: dark("#0b1026", "#141a38", "#1c2448", "#2a3360", "#eef0ff", "#a3a9cc", "#6c8cff") },
   // Apple Fitness-style true black.
@@ -34,13 +38,13 @@ export const DARK: Record<string, Palette> = {
 };
 
 export type ThemePrefs = { mode: Mode; light: string; dark: string };
-export const DEFAULT_THEME: ThemePrefs = { mode: "system", light: "daylight", dark: "midnight" };
+export const DEFAULT_THEME: ThemePrefs = { mode: "system", light: "health", dark: "health" };
 
 const mq = window.matchMedia("(prefers-color-scheme: dark)");
 
 export function applyTheme(t: ThemePrefs) {
   const isDark = t.mode === "dark" || (t.mode === "system" && mq.matches);
-  const p = isDark ? DARK[t.dark] ?? DARK.midnight : LIGHT[t.light] ?? LIGHT.daylight;
+  const p = isDark ? DARK[t.dark] ?? DARK.health : LIGHT[t.light] ?? LIGHT.health;
   const root = document.documentElement;
   for (const [k, v] of Object.entries(p.vars)) root.style.setProperty(k, v);
   root.dataset.mode = isDark ? "dark" : "light";

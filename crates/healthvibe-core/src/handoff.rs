@@ -63,7 +63,11 @@ pub async fn create(db: &SqlitePool, user_id: i64) -> anyhow::Result<NewHandoff>
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(NewHandoff { id, code, expires_at: exp })
+    Ok(NewHandoff {
+        id,
+        code,
+        expires_at: exp,
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -91,7 +95,9 @@ pub async fn claim(db: &SqlitePool, code: &str) -> anyhow::Result<Claim> {
     .bind(&t)
     .fetch_optional(db)
     .await?;
-    let Some(uid) = user else { return Ok(Claim::Invalid) };
+    let Some(uid) = user else {
+        return Ok(Claim::Invalid);
+    };
     let token = shortcut::new_token(db, uid, crate::hae::DEVICE).await?;
     Ok(Claim::Ok(uid, token))
 }
@@ -106,13 +112,12 @@ pub struct Status {
 
 /// Status of one of `user_id`'s handoffs (None if it isn't theirs).
 pub async fn status(db: &SqlitePool, user_id: i64, id: &str) -> anyhow::Result<Option<Status>> {
-    let row: Option<(String, Option<String>)> = sqlx::query_as(
-        "SELECT expires_at, claimed_at FROM handoffs WHERE id = ? AND user_id = ?",
-    )
-    .bind(id)
-    .bind(user_id)
-    .fetch_optional(db)
-    .await?;
+    let row: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT expires_at, claimed_at FROM handoffs WHERE id = ? AND user_id = ?")
+            .bind(id)
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?;
     Ok(row.map(|(expires_at, claimed_at)| Status {
         claimed: claimed_at.is_some(),
         expired: claimed_at.is_none() && expires_at <= now(),
