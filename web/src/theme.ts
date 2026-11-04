@@ -11,6 +11,9 @@ const light = (bg: string, s1: string, s2: string, border: string, text: string,
   "--move": "#e8124f", "--exercise": "#4fb800", "--stand": "#00a3c4",
   "--heart": "#e5383b", "--awake": "#f29a2e", "--rem": "#2fb5e8", "--core": "#2f6fe8", "--deep": "#5b3fc4",
   "--chart-1": accent, "--chart-2": "#7c5cff",
+  "--c-activity": "#ff3b30", "--c-body": "#af52de", "--c-heart": "#ff2d55", "--c-mind": "#30b0c7",
+  "--c-mobility": "#ff9500", "--c-nutrition": "#34c759", "--c-resp": "#007aff", "--c-sleep": "#5856d6",
+  "--c-vitals": "#ff2d55", "--c-other": "#8e8e93", "--steps": "#7d5cff", "--distance": "#0fb5c9", "--good": "#34c759",
 });
 const dark = (bg: string, s1: string, s2: string, border: string, text: string, muted: string, accent: string) => ({
   "--bg": bg, "--surface": s1, "--surface-2": s2, "--border": border, "--text": text,
@@ -18,6 +21,9 @@ const dark = (bg: string, s1: string, s2: string, border: string, text: string, 
   "--move": "#fa114f", "--exercise": "#a6ff00", "--stand": "#00f0e0",
   "--heart": "#ff5a5f", "--awake": "#ffb35c", "--rem": "#5ecbff", "--core": "#3d7bff", "--deep": "#8a6cff",
   "--chart-1": accent, "--chart-2": "#b49cff",
+  "--c-activity": "#ff453a", "--c-body": "#bf5af2", "--c-heart": "#ff375f", "--c-mind": "#40c8e0",
+  "--c-mobility": "#ff9f0a", "--c-nutrition": "#30d158", "--c-resp": "#0a84ff", "--c-sleep": "#5e5ce6",
+  "--c-vitals": "#ff375f", "--c-other": "#98989d", "--steps": "#a78bff", "--distance": "#40e0f0", "--good": "#30d158",
 });
 
 export const LIGHT: Record<string, Palette> = {

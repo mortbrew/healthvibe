@@ -43,7 +43,7 @@ export function HelpIndex() {
           <h2>Open the welcome setup again</h2>
           <p className="muted">The guided first-run setup, with a live check for your first upload.</p>
         </Link>
-        <Link to="/import" className="card linkcard">
+        <Link to="/settings/import" className="card linkcard">
           <h2>Import an export.zip</h2>
           <p className="muted">One-off import of your full history from the Health app.</p>
         </Link>
@@ -114,7 +114,7 @@ export function ShortcutGuide() {
       </div>
       <ol className="guide">
         <Step n={1} title="Choose what to sync">
-          <p>In <Link to="/settings">Settings → iPhone Shortcut sync</Link>, tick what you want to send and save. Only those types are read on the phone.</p>
+          <p>In <Link to="/account">Settings → iPhone Shortcut sync</Link>, tick what you want to send and save. Only those types are read on the phone.</p>
         </Step>
         <Step n={2} title="Get the Shortcut on your iPhone">
           <p>Follow <Link to="/help/build">Build the Shortcut yourself</Link>. Run it once from the Shortcuts app and tap <b>Allow</b> for each Health type it asks about (you can review this later in Settings → Health → Data Access → Shortcuts).</p>

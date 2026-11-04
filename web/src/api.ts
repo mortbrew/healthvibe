@@ -9,6 +9,7 @@ export type User = {
   theme_light: string;
   theme_dark: string;
   onboarding_done: boolean;
+  awards_enabled: boolean;
 };
 
 export class ApiError extends Error {
@@ -51,6 +52,10 @@ export const messages: Record<string, string> = {
   too_many_widgets: "A dashboard can hold up to 40 widgets.",
   too_many_dashboards: "You can have up to 50 dashboards.",
   invalid_name: "Dashboard names need 1 to 60 characters.",
+  invalid_pinned: "You can pin up to 30 metrics.",
+  invalid_profile: "Check the profile fields: dates as YYYY-MM-DD, height 30–272 cm, goals in range.",
+  invalid_date: "Use a date like 2026-11-04.",
+  confirm_mismatch: "Type your username exactly to confirm.",
 };
 
 export const explain = (e: unknown) =>

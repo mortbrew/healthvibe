@@ -162,7 +162,7 @@ export default function Dashboard() {
           </p>
           <div className="row">
             <Link to="/help/health-auto-export" className="button primary">Health Auto Export setup</Link>
-            <Link to="/import" className="button">Import an export</Link>
+            <Link to="/settings/import" className="button">Import an export</Link>
           </div>
         </div>
       ) : ws.length === 0 ? (

@@ -127,7 +127,7 @@ export function SetupQr() {
   if (!info.configured)
     return (
       <div className="card notice">
-        First <Link to="/settings">choose what to sync in Settings</Link>. Your setup QR code appears here afterwards.
+        First <Link to="/account">choose what to sync in Settings</Link>. Your setup QR code appears here afterwards.
       </div>
     );
   return (

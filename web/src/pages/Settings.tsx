@@ -4,7 +4,7 @@ import { applyTheme, DARK, LIGHT, Mode, ThemePrefs } from "../theme";
 import { ChangePassword } from "./Auth";
 import { HaeSettings } from "../components/Hae";
 
-export default function Settings({ user, onUser }: { user: User; onUser: (u: User) => void }) {
+export function Appearance({ user, onUser }: { user: User; onUser: (u: User) => void }) {
   const [t, setT] = useState<ThemePrefs>({ mode: user.theme_mode, light: user.theme_light, dark: user.theme_dark });
   const [saved, setSaved] = useState<string | null>(null);
   const save = async (next: ThemePrefs) => {
@@ -19,8 +19,6 @@ export default function Settings({ user, onUser }: { user: User; onUser: (u: Use
     }
   };
   return (
-    <div>
-      <header className="pagehead"><h1>Settings</h1></header>
       <section className="card">
         <div className="cardhead">
           <h2>Appearance</h2>
@@ -39,6 +37,14 @@ export default function Settings({ user, onUser }: { user: User; onUser: (u: Use
         <Palettes set={DARK} value={t.dark} onPick={(dark) => save({ ...t, dark })} />
         <p className="muted foot">Follow system uses the light or dark palette to match your device.</p>
       </section>
+  );
+}
+
+export default function Settings({ user, onUser }: { user: User; onUser: (u: User) => void }) {
+  return (
+    <div>
+      <header className="pagehead"><h1>Settings</h1></header>
+      <Appearance user={user} onUser={onUser} />
       <HaeSettings />
       <ChangePassword user={user} onDone={onUser} />
     </div>

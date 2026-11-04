@@ -45,32 +45,47 @@ export const ringsOf = (d: { move_kcal: number; move_goal: number; exercise_min:
   stand: [d.stand_hours, d.stand_goal],
 });
 
-/** Original award badge: hexagon medal with diagonal ring-color stripes. */
-export function Badge({ kind, size = 96 }: { kind: string; size?: number }) {
-  const colors: Record<string, [string, string, string]> = {
-    perfect_week: ["var(--move)", "var(--exercise)", "var(--stand)"],
-    move_streak: ["var(--move)", "#ff8a3d", "var(--move)"],
-    record_steps: ["#b18cff", "#7d5cff", "#b18cff"],
-    ten_k: ["#ffd23d", "#ffa63d", "#ffd23d"],
-  };
-  const [a, b, c] = colors[kind] ?? colors.perfect_week;
-  const id = `bd-${kind}`;
+const PAL: Record<string, [string, string]> = {
+  move: ["#ff2d55", "#ff8a3d"], exercise: ["#9cf000", "#2bd96b"], stand: ["#33e8ff", "#2d8cff"],
+  all: ["#ff2d55", "#33e8ff"], steps: ["#b18cff", "#6e4bff"], workout: ["#ffd23d", "#ff8a1f"], record: ["#ffe27a", "#d9a21b"],
+};
+
+/** Original award badges: ring medallion, hexagon, or round medal, colored by category. */
+export function Badge({ color, shape, mark, size = 96, dim }: { color: string; shape: string; mark?: string; size?: number; dim?: boolean }) {
+  const [a, b] = PAL[color] ?? PAL.move;
+  const id = `bd-${color}-${shape}`;
+  const text = mark ? <text x="50" y="58" textAnchor="middle" className="badge-mark" fontSize={mark.length > 3 ? 15 : mark.length > 2 ? 19 : 24}>{mark}</text> : null;
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden className={dim ? "badge dim" : "badge"}>
       <defs>
-        <linearGradient id={id + "m"} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#f6e7a8" /><stop offset=".5" stopColor="#c9a64a" /><stop offset="1" stopColor="#f3dc8c" />
-        </linearGradient>
-        <clipPath id={id + "c"}><path d="M50 12 83 31v38L50 88 17 69V31Z" /></clipPath>
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={a} /><stop offset="1" stopColor={b} /></linearGradient>
+        <linearGradient id={id + "m"} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#fafafa" /><stop offset=".5" stopColor="#a9abb3" /><stop offset="1" stopColor="#e9eaee" /></linearGradient>
       </defs>
-      <path d="M50 4 89 27v46L50 96 11 73V27Z" fill={`url(#${id}m)`} />
-      <path d="M50 12 83 31v38L50 88 17 69V31Z" fill="#f4efe4" />
-      <g clipPath={`url(#${id}c)`} strokeWidth="9" fill="none" strokeLinecap="round">
-        <path d="M8 62 92 30" stroke={a} />
-        <path d="M8 74 92 42" stroke={b} />
-        <path d="M8 86 92 54" stroke={c} />
-      </g>
-      <path d="M58 22 44 50h10l-8 26" fill="none" stroke="#fff" strokeWidth="4" strokeLinejoin="round" opacity=".9" />
+      {shape === "hex" && (
+        <>
+          <path d="M50 3 91 26.5v47L50 97 9 73.5v-47Z" fill={`url(#${id}m)`} />
+          <path d="M50 10 85 30v40L50 90 15 70V30Z" fill={`url(#${id})`} />
+          <path d="M50 18 78 34v32L50 82 22 66V34Z" fill="#000" opacity=".22" />
+          {text}
+        </>
+      )}
+      {shape === "medal" && (
+        <>
+          <circle cx="50" cy="50" r="46" fill={`url(#${id}m)`} />
+          <circle cx="50" cy="50" r="40" fill={`url(#${id})`} />
+          {Array.from({ length: 12 }, (_, i) => <path key={i} d="M50 13v8" stroke="#fff" strokeOpacity=".45" strokeWidth="3" strokeLinecap="round" transform={`rotate(${i * 30} 50 50)`} />)}
+          <circle cx="50" cy="50" r="27" fill="#000" opacity=".25" />
+          {text}
+        </>
+      )}
+      {shape !== "hex" && shape !== "medal" && (
+        <>
+          <circle cx="50" cy="50" r="46" fill="#1c1c1e" />
+          <circle cx="50" cy="50" r="34" fill="none" stroke={`url(#${id})`} strokeWidth="14" />
+          <circle cx="50" cy="50" r="46" fill="none" stroke={`url(#${id}m)`} strokeWidth="3" />
+          {mark ? text : <path d="M41 50l7 7 13-14" fill="none" stroke="#fff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />}
+        </>
+      )}
     </svg>
   );
 }

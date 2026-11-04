@@ -79,6 +79,11 @@ def main():
             e = s + dt.timedelta(minutes=30)
             rec(out, HK + "StepCount", "iPhone", "count", int(base * 0.85), s, e)
             rec(out, HK + "StepCount", "Apple Watch", "count", base, s, e)
+            rec(out, HK + "DistanceWalkingRunning", "Apple Watch", "mi", round(base * 0.00047, 3), s, e)
+            if i % 3 == 0 and h == 12:
+                rec(out, HK + "WalkingSpeed", "iPhone", "mi/hr", round(rnd.uniform(2.8, 3.4), 2), s, s)
+            if i % 5 == 0 and h == 18:
+                rec(out, HK + "VO2Max", "Apple Watch", "mL/min·kg", round(41 + i * 0.004 + rnd.uniform(-1, 1), 1), s, s)
             kcal = base * 0.045 + rnd.uniform(5, 15)
             rec(out, HK + "ActiveEnergyBurned", "Apple Watch", "kcal", round(kcal, 2), s, e)
             if rnd.random() < 0.8:
@@ -86,7 +91,14 @@ def main():
                 rec(out, "HKCategoryTypeIdentifierAppleStandHour", "Apple Watch", None,
                     "HKCategoryValueAppleStandHourStood", d0 + dt.timedelta(hours=h), st)
             if active and h == (9 if weekend else 18):
-                rec(out, HK + "AppleExerciseTime", "Apple Watch", "min", rnd.randint(28, 55), s, e)
+                mins = rnd.randint(28, 55)
+                rec(out, HK + "AppleExerciseTime", "Apple Watch", "min", mins, s, e)
+                kind = rnd.choice(["Walking", "Running", "Cycling", "TraditionalStrengthTraining"])
+                out.append(
+                    f'  <Workout workoutActivityType="HKWorkoutActivityType{kind}" duration="{mins}"'
+                    f' durationUnit="min" sourceName="Apple Watch" startDate="{fmt(s)}"'
+                    f' endDate="{fmt(s + dt.timedelta(minutes=mins))}"/>'
+                )
             elif rnd.random() < 0.2:
                 rec(out, HK + "AppleExerciseTime", "Apple Watch", "min", rnd.randint(1, 6), s, e)
 

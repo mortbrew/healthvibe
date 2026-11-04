@@ -43,12 +43,12 @@ export default function Onboarding({ user, onUser }: { user: User; onUser: (u: U
         <section className="card">
           <p>
             Optional: load your full history once. In the Health app tap your picture → <b>Export All Health Data</b>,
-            then upload the <code>export.zip</code> on the <Link to="/import">Import</Link> page. Readings already sent by
+            then upload the <code>export.zip</code> on the <Link to="/settings/import">Import</Link> page. Readings already sent by
             Health Auto Export may appear twice for the overlapping days.
           </p>
           <div className="row">
             <button className="ghost" onClick={() => setStep(1)}>Back</button>
-            <Link to="/import" className="button">Import export.zip now</Link>
+            <Link to="/settings/import" className="button">Import export.zip now</Link>
             <button onClick={() => setStep(3)}>Skip import</button>
           </div>
         </section>

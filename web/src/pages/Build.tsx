@@ -25,7 +25,7 @@ export default function BuildGuide() {
         search. iOS sometimes names things slightly differently between versions; pick the closest match.
       </p>
       <div className="card notice">
-        Before you start: <Link to="/settings">choose what to sync</Link>, and in the <b>Files</b> app create the folder
+        Before you start: <Link to="/account">choose what to sync</Link>, and in the <b>Files</b> app create the folder
         {" "}<b>iCloud Drive → Shortcuts → healthvibe</b>.
       </div>
 
