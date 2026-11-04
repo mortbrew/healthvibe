@@ -308,7 +308,7 @@ pub fn compute(days: &[Day], workouts: &[Workout]) -> Vec<AwardOut> {
     }
 
     // Perfect weeks / month and streaks.
-    let pw: [(&str, &str, &'static str, &dyn Fn(&Day) -> bool); 4] = [
+    let pw: [Ring; 4] = [
         ("move", "Move", "move", &cm),
         ("exercise", "Exercise", "exercise", &ce),
         ("stand", "Stand", "stand", &cs),
