@@ -166,3 +166,11 @@ progress { width: 100%; accent-color: var(--accent); }
 img.qr { width: 220px; height: 220px; border-radius: 12px; background: #fff; padding: 6px; }
 .codeblock { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; }
 .action { color: var(--accent); }
+
+.copyrow { display: flex; gap: .5rem; align-items: center; margin: .35rem 0; flex-wrap: wrap; }
+.copyrow > span { min-width: 6.5rem; }
+.copyval { flex: 1; word-break: break-all; padding: .3rem .5rem; border-radius: 6px; background: var(--surface-2, rgba(127,127,127,.12)); }
+.checklist { columns: 2; list-style: none; padding: 0; }
+.sponsor { margin-top: 1.5rem; }
+.pulse { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--move); animation: hvpulse 1.2s infinite; }
+@keyframes hvpulse { 50% { opacity: .2; } }

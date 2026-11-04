@@ -735,6 +735,26 @@ pub async fn claim(
     Ok(Some((user_id, format!("hvu_{prefix}_{secret}"))))
 }
 
+/// Create (or replace) this user's upload token directly from the web app,
+/// for apps such as Health Auto Export that take a pasted token.
+pub async fn new_token(db: &SqlitePool, user_id: i64, device: &str) -> anyhow::Result<String> {
+    let prefix = random_hex(6);
+    let secret = random_hex(32);
+    sqlx::query(
+        "INSERT OR REPLACE INTO upload_tokens
+         (user_id, prefix, secret_hash, device, shortcut_version, created_at)
+         VALUES (?, ?, ?, ?, NULL, ?)",
+    )
+    .bind(user_id)
+    .bind(&prefix)
+    .bind(sha256_hex(&secret))
+    .bind(device.chars().take(100).collect::<String>())
+    .bind(now())
+    .execute(db)
+    .await?;
+    Ok(format!("hvu_{prefix}_{secret}"))
+}
+
 fn ct_eq(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
@@ -1078,6 +1098,9 @@ pub fn convert(x: f64, from: &str, to: &str) -> f64 {
         // Apple shows kilocalories as "Cal".
         ("cal", "kcal") => x,
         ("mph" | "mi/hr", "km/hr") => x * 1.609_344,
+        ("m/s", "km/hr") => x * 3.6,
+        ("ft/s", "m/s") => x * 0.3048,
+        ("km/hr" | "kph", "m/s") => x / 3.6,
         ("floz" | "fl_oz_us", "mL") => x * 29.573_53,
         ("l", "mL") => x * 1000.0,
         ("hr" | "h", "min") => x * 60.0,

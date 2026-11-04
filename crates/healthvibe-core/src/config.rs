@@ -20,6 +20,8 @@ pub struct Config {
     pub public_url: Option<String>,
     /// Largest accepted Shortcut upload in bytes (default 5 MiB).
     pub max_request_bytes: usize,
+    /// Largest accepted Health Auto Export upload in bytes (default 256 MiB).
+    pub hae_max_request_bytes: usize,
 }
 
 impl Config {
@@ -43,6 +45,9 @@ impl Config {
             max_request_bytes: get("HEALTHVIBE_MAX_REQUEST_BYTES", "5242880")
                 .parse()
                 .unwrap_or(5 * 1024 * 1024),
+            hae_max_request_bytes: get("HEALTHVIBE_HAE_MAX_REQUEST_BYTES", "268435456")
+                .parse()
+                .unwrap_or(256 * 1024 * 1024),
         }
     }
 

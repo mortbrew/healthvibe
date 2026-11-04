@@ -1,6 +1,6 @@
 # healthvibe
 
-Self-hosted, privacy-first Apple Health dashboard: full-history export.xml import, daily iPhone Shortcut uploads, multi-user, themeable web UI, and a read-only MCP server.
+Self-hosted, privacy-first Apple Health dashboard: full-history export.xml import, automatic iPhone sync via the Health Auto Export app, multi-user, themeable web UI, and a read-only MCP server.
 
 Status: early development.
 
@@ -25,22 +25,39 @@ except the public base images. See comments in `compose.yaml` and `.env.example`
 
 Undo steps 2 and 3 before putting the app behind your reverse proxy.
 
-### iPhone Shortcut sync
+### iPhone sync (Health Auto Export)
 
-1. Set `HEALTHVIBE_PUBLIC_URL` in `.env` to the HTTPS address your iPhone uses.
-2. In the web app: **Settings → iPhone Shortcut sync**, choose what to send, **Save**.
-3. **Help → Build the Shortcut yourself** lists every Shortcuts action; **Help → Set up
-   the iPhone Shortcut** shows the one-time setup QR code (new on every page load,
-   10 minutes, single use).
+v1 syncs with the [Health Auto Export](https://apps.apple.com/app/id1115567069) iOS app
+(Premium, REST API automations). New users get a guided setup after first sign-in;
+re-open it from **Settings** or **Help → Sync your iPhone with Health Auto Export**.
 
-Endpoints: `POST /api/v1/shortcut/claim` (setup code → upload token `hvu_…`),
-`GET /api/v1/shortcut/config` and `POST /api/v1/ingest` (both with
-`Authorization: Bearer hvu_…`). Only a hash of the token is stored; reset it from
-**Help → I messed up my Shortcut**. Simulate the phone with curl:
+1. **Settings → iPhone sync → Create my token** shows the URL and header once.
+2. In Health Auto Export: Automations → + → REST API.
+   - URL: `https://<HEALTHVIBE_PUBLIC_URL>/api/v1/ingest/hae`
+   - Header: `Authorization: Bearer hvu_…` (or `X-Healthvibe-Token: hvu_…`; `api-key` also works)
+   - Export Format **JSON**, Data Type **Health Metrics** (and a second automation for
+     **Workouts**, v2), Batch Requests **on**, Aggregate Data off for every reading and sleep stage.
+3. Turn on all metrics in Health Auto Export except raw Heart Rate (keep Resting HR,
+   Walking HR Average and HRV). heart_rate is still accepted if sent. healthvibe stores every metric it receives
+   (known ones mapped, unknown ones kept as `healthvibe.hae.<name>`). Re-sent readings
+   are updated, never doubled. Max body: `HEALTHVIBE_HAE_MAX_REQUEST_BYTES` (256 MiB).
+4. Data only syncs while the iPhone is unlocked (iOS protects Health data when locked).
+
+Simulate the phone (synthetic fixture):
 
 ```sh
-TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' -d '{"setup_code":"<code from the setup page>","device_name":"curl"}' http://127.0.0.1:8000/api/v1/shortcut/claim | jq -r .upload_token) && curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/v1/shortcut/config && curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"metrics":{"stepCount":{"samples":[{"start":"2026-11-02T07:00:00-05:00","end":"2026-11-02T07:10:00-05:00","value":812,"source":"curl"}]}}}' http://127.0.0.1:8000/api/v1/ingest
+curl -X POST http://localhost:8080/api/v1/ingest/hae -H "Authorization: Bearer hvu_…" \
+  -H 'Content-Type: application/json' --data @crates/healthvibe-core/tests/fixtures/hae.json
 ```
+
+The DIY iPhone Shortcut path (`/api/v1/shortcut/*`) is still in the code but hidden from
+Help for v1.
+
+### A free sync app?
+
+A free healthvibe iPhone app needs a paid Apple developer account. If
+[GitHub Sponsors](https://github.com/sponsors/mortbrew) and donations cover the yearly Apple
+developer fee, I'll build a free data sync app available to everyone. — Toby
 
 ### Developing
 

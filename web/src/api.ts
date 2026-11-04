@@ -8,6 +8,7 @@ export type User = {
   theme_mode: "system" | "light" | "dark";
   theme_light: string;
   theme_dark: string;
+  onboarding_done: boolean;
 };
 
 export class ApiError extends Error {
@@ -114,3 +115,14 @@ export type SyncInfo = {
   shortcut_version: string;
 };
 export type SetupCode = { code: string; expires_at: string; server: string; public_url_set: boolean; link: string };
+
+export type HaeInfo = {
+  url: string;
+  public_url_set: boolean;
+  header: string;
+  has_token: boolean;
+  device: SyncDevice | null;
+  received: number;
+  max_request_bytes: number;
+};
+export type HaeToken = { token: string; url: string; public_url_set: boolean; header: string };

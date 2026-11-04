@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, explain } from "../api";
 import { SetupQr, useSync, DeviceLine } from "../components/Sync";
 import { Link } from "../router";
+import { HaeConnect, HaeSteps, SponsorNote } from "../components/Hae";
 
 /** Placeholder for a screenshot that hasn't been captured on a real iPhone yet. */
 function Shot({ label }: { label: string }) {
@@ -34,27 +35,42 @@ export function HelpIndex() {
     <div>
       <header className="pagehead"><h1>Help</h1></header>
       <div className="grid">
-        <Link to="/help/shortcut" className="card linkcard">
-          <h2>Set up the iPhone Shortcut</h2>
-          <p className="muted">Send new Health data automatically every day, step by step.</p>
+        <Link to="/help/health-auto-export" className="card linkcard">
+          <h2>Sync your iPhone with Health Auto Export</h2>
+          <p className="muted">Send Apple Health data to healthvibe automatically, step by step.</p>
         </Link>
-        <Link to="/help/build" className="card linkcard">
-          <h2>Build the Shortcut yourself</h2>
-          <p className="muted">Every action, in order, to make the healthvibe Shortcut by hand.</p>
-        </Link>
-        <Link to="/help/messed-up" className="card linkcard">
-          <h2>Help, I messed up my Shortcut</h2>
-          <p className="muted">Reset everything on the phone and reinstall from scratch.</p>
+        <Link to="/welcome" className="card linkcard">
+          <h2>Open the welcome setup again</h2>
+          <p className="muted">The guided first-run setup, with a live check for your first upload.</p>
         </Link>
         <Link to="/import" className="card linkcard">
           <h2>Import an export.zip</h2>
           <p className="muted">One-off import of your full history from the Health app.</p>
         </Link>
       </div>
+      <SponsorNote />
     </div>
   );
 }
 
+export function HaeGuide() {
+  return (
+    <div className="help">
+      <header className="pagehead">
+        <p className="eyebrow"><Link to="/help">Help</Link></p>
+        <h1>Sync your iPhone with Health Auto Export</h1>
+      </header>
+      <p className="lead">
+        Health Auto Export reads Apple Health on your iPhone and posts it to healthvibe as JSON (REST API automation).
+        Data only syncs while your iPhone is unlocked, because iOS locks Health data otherwise.
+      </p>
+      <HaeSteps connect={<HaeConnect />} />
+      <SponsorNote />
+    </div>
+  );
+}
+
+// The DIY Shortcut guides below are kept but no longer linked from Help (v1 uses Health Auto Export).
 const TRIGGERS = {
   alarm: {
     label: "When I stop my alarm (recommended)",

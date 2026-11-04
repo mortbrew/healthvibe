@@ -16,7 +16,7 @@ use axum::{
     body::Bytes,
     extract::{ConnectInfo, DefaultBodyLimit, FromRequestParts, State},
     http::{header, request::Parts, HeaderMap, StatusCode},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use healthvibe_core::shortcut::{self as sc, IngestError, SettingsError};
@@ -38,6 +38,11 @@ pub fn routes() -> Router<AppState> {
         .route("/shortcut/config", get(config))
         // The size limit is applied inside `ingest` from the config.
         .route("/ingest", post(ingest).layer(DefaultBodyLimit::disable()))
+        // Health Auto Export (v1 sync path).
+        .route("/sync/hae", get(hae_info))
+        .route("/sync/hae/token", post(hae_token))
+        .route("/me/onboarding", put(onboarding))
+        .route("/ingest/hae", post(hae_ingest).layer(DefaultBodyLimit::disable()))
 }
 
 // ------------------------------------------------------------ rate limits
@@ -107,11 +112,13 @@ impl FromRequestParts<AppState> for Device {
     type Rejection = ApiError;
     async fn from_request_parts(p: &mut Parts, st: &AppState) -> Result<Self, ApiError> {
         let unauth = ApiError(StatusCode::UNAUTHORIZED, "invalid_token");
-        let tok = p
-            .headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
+        // Authorization: Bearer hvu_…, or X-Healthvibe-Token / api-key: hvu_…
+        // for apps that only let you add a plain header.
+        let h = |n: &str| p.headers.get(n).and_then(|v| v.to_str().ok());
+        let tok = h(header::AUTHORIZATION.as_str())
             .and_then(|v| v.strip_prefix("Bearer ").or(v.strip_prefix("bearer ")))
+            .or_else(|| h("x-healthvibe-token"))
+            .or_else(|| h("api-key"))
             .map(str::trim)
             .ok_or(unauth)?;
         let version = p
@@ -299,6 +306,87 @@ async fn ingest(
         Err(IngestError::UnknownMetric(k)) => Ok((
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({ "error": "unknown_metric", "metric": k })),
+        )),
+    }
+}
+
+// ------------------------------------------------------------ Health Auto Export
+
+use healthvibe_core::hae;
+
+const HAE_UPLOADS_PER_HOUR: u32 = 2000;
+
+fn hae_url(st: &AppState, h: &HeaderMap) -> (String, bool) {
+    let (server, set) = server_url(st, h);
+    (format!("{}{}", server.trim_end_matches('/'), hae::PATH), set)
+}
+
+async fn hae_info(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+    let device = sc::token_info(&st.db, u.id).await?;
+    let received = hae::received(&st.db, u.id).await?;
+    let (url, public_url_set) = hae_url(&st, &h);
+    Ok(Json(json!({
+        "url": url,
+        "public_url_set": public_url_set,
+        "header": hae::TOKEN_HEADER,
+        "has_token": device.is_some(),
+        "device": device,
+        "received": received.unwrap_or(0),
+        "max_request_bytes": st.config.hae_max_request_bytes,
+    })))
+}
+
+/// Create a new token (replaces any earlier one). Shown once.
+async fn hae_token(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+    let token = sc::new_token(&st.db, u.id, hae::DEVICE).await?;
+    let (url, public_url_set) = hae_url(&st, &h);
+    tracing::info!(user = u.id, "health auto export token created");
+    Ok(Json(json!({
+        "token": token,
+        "url": url,
+        "public_url_set": public_url_set,
+        "header": hae::TOKEN_HEADER,
+    })))
+}
+
+#[derive(Deserialize)]
+struct OnboardingIn {
+    done: bool,
+}
+
+async fn onboarding(State(st): State<AppState>, User(u): User, Json(b): Json<OnboardingIn>) -> ApiResult {
+    sqlx::query("UPDATE users SET onboarding_done = ? WHERE id = ?")
+        .bind(b.done)
+        .bind(u.id)
+        .execute(&st.db)
+        .await
+        .map_err(anyhow::Error::from)?;
+    Ok(Json(json!({ "onboarding_done": b.done })))
+}
+
+async fn hae_ingest(
+    State(st): State<AppState>,
+    d: Device,
+    body: axum::body::Body,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let body = axum::body::to_bytes(body, st.config.hae_max_request_bytes)
+        .await
+        .map_err(|_| ApiError(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large"))?;
+    if !allow(
+        format!("hae:{}", d.token_prefix),
+        HAE_UPLOADS_PER_HOUR,
+        Duration::from_secs(3600),
+    ) {
+        return Err(too_many());
+    }
+    match hae::ingest(&st.db, d.user_id, &body).await? {
+        Ok(r) => {
+            tracing::info!(user = d.user_id, accepted = r.accepted, updated = r.updated, "health auto export upload");
+            Ok((StatusCode::OK, Json(json!(r))))
+        }
+        Err(e) => Ok((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "bad_json", "detail": e })),
         )),
     }
 }

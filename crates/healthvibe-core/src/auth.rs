@@ -83,11 +83,12 @@ pub struct User {
     pub theme_mode: String,
     pub theme_light: String,
     pub theme_dark: String,
+    pub onboarding_done: bool,
 }
 
 pub async fn get_user(db: &SqlitePool, id: i64) -> anyhow::Result<Option<User>> {
     Ok(sqlx::query_as(
-        "SELECT id, username, is_admin, must_change_password, theme_mode, theme_light, theme_dark
+        "SELECT id, username, is_admin, must_change_password, theme_mode, theme_light, theme_dark, onboarding_done
          FROM users WHERE id = ? AND password_hash IS NOT NULL",
     )
     .bind(id)
@@ -97,7 +98,7 @@ pub async fn get_user(db: &SqlitePool, id: i64) -> anyhow::Result<Option<User>> 
 
 pub async fn list_users(db: &SqlitePool) -> anyhow::Result<Vec<User>> {
     Ok(sqlx::query_as(
-        "SELECT id, username, is_admin, must_change_password, theme_mode, theme_light, theme_dark
+        "SELECT id, username, is_admin, must_change_password, theme_mode, theme_light, theme_dark, onboarding_done
          FROM users WHERE password_hash IS NOT NULL ORDER BY id",
     )
     .fetch_all(db)
