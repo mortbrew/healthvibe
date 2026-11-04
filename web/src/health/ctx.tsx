@@ -6,10 +6,10 @@ import { AvatarCfg } from "./avatar";
 export type Units = { distance: "mi" | "km"; weight: "lb" | "kg"; energy: "cal" | "kj"; temp: "f" | "c" };
 export type Profile = {
   display_name: string | null; birth_date: string | null; sex: string | null; height_cm: number | null;
-  wheelchair: boolean | null; avatar: Partial<AvatarCfg> | null; move_goal: number | null;
-  exercise_goal: number | null; stand_goal: number | null; units: Partial<Units> | null;
+  wheelchair: boolean | null; avatar: Partial<AvatarCfg> | null;
+  units: Partial<Units> | null;
 };
-export const EMPTY_PROFILE: Profile = { display_name: null, birth_date: null, sex: null, height_cm: null, wheelchair: null, avatar: null, move_goal: null, exercise_goal: null, stand_goal: null, units: null };
+export const EMPTY_PROFILE: Profile = { display_name: null, birth_date: null, sex: null, height_cm: null, wheelchair: null, avatar: null, units: null };
 
 export type Ctx = { user: User; onUser: (u: User) => void; profile: Profile; setProfile: (p: Profile) => void; avatar: AvatarCfg; name: string; units: Units; logout: () => void };
 export const HealthCtx = createContext<Ctx>(null as unknown as Ctx);

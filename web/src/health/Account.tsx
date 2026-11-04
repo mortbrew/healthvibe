@@ -13,7 +13,6 @@ import { EMPTY_PROFILE, Profile, unitsOf, Units, useHealth } from "./ctx";
 import { Group, NavBar, RoundBtn, Row, XIcon } from "./ui";
 
 export function AccountSheet() {
-  const { user, name, avatar, logout } = useHealth();
   return (
     <div className="fullsheet account" role="dialog" aria-label="Account">
       <div className="sheet-head">
@@ -21,36 +20,43 @@ export function AccountSheet() {
         <b>Account</b>
         <span style={{ width: 36 }} />
       </div>
-      <div className="sheet-body">
-        <Group>
-          <Row to="/account/profile" icon={<AvatarSvg cfg={avatar} size={54} />} label={<span className="profrow"><b>{name}</b><small className="muted">@{user.username}</small></span>} />
-        </Group>
-        <Group>
-          <Row to="/account/details" label="Health Details" />
-          <Row to="/account/goals" label="Change Goals" />
-          <Row to="/account/units" label="Units of Measure" />
-          <Row to="/account/privacy" label="Privacy" />
-        </Group>
-        <Group>
-          <Row to="/account/sync" label="iPhone Sync (Health Auto Export)" tone="green" />
-          <Row to="/settings/import" label="Import Health Data" tone="green" />
-          <Row to="/account/awards" label="Awards" tone="green" />
-        </Group>
-        {user.is_admin && <Group><Row to="/settings/users" label="Users" /></Group>}
-        <Group>
-          <Row to="/account/appearance" label="Appearance" />
-          <Row to="/help" label="Help" />
-          <Row to="/account/password" label="Change Password" />
-        </Group>
-        <Group><Row onClick={logout} label="Sign Out" tone="red" /></Group>
-      </div>
+      <div className="sheet-body"><AccountMenu /></div>
     </div>
   );
 }
 
-function Sub({ title, children }: { title: string; children: React.ReactNode }) {
+/** The Account list: a sheet on phone/tablet, the left pane of the two-pane settings page on desktop. */
+export function AccountMenu() {
+  const { user, name, avatar, logout } = useHealth();
   return (
-    <div className="page sub">
+    <>
+      <Group>
+        <Row to="/account/profile" icon={<AvatarSvg cfg={avatar} size={54} />} label={<span className="profrow"><b>{name}</b><small className="muted">@{user.username}</small></span>} />
+      </Group>
+      <Group>
+        <Row to="/account/details" label="Health Details" />
+        <Row to="/account/units" label="Units of Measure" />
+        <Row to="/account/privacy" label="Privacy" />
+      </Group>
+      <Group>
+        <Row to="/account/sync" label="iPhone Sync (Health Auto Export)" tone="green" />
+        <Row to="/settings/import" label="Import Health Data" tone="green" />
+        <Row to="/account/awards" label="Awards" tone="green" />
+      </Group>
+      {user.is_admin && <Group><Row to="/settings/users" label="Users" /></Group>}
+      <Group>
+        <Row to="/account/appearance" label="Appearance" />
+        <Row to="/help" label="Help" />
+        <Row to="/account/password" label="Change Password" />
+      </Group>
+      <Group><Row onClick={logout} label="Sign Out" tone="red" /></Group>
+    </>
+  );
+}
+
+function Sub({ title, children, wide }: { title: string; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <div className={wide ? "page sub wide" : "page sub"}>
       <NavBar to="/account" title={title} />
       {children}
     </div>
@@ -77,7 +83,7 @@ export function ProfilePage() {
   const [name, setName] = useState(profile.display_name ?? "");
   const [cfg, setCfg] = useState(asCfg(profile.avatar, user.username));
   return (
-    <Sub title="Profile & Avatar">
+    <Sub title="Profile & Avatar" wide>
       <section className="card">
         <label className="field">Display name<input value={name} maxLength={60} placeholder={user.username} onChange={(e) => setName(e.target.value)} /></label>
         <p className="muted small">Used in greetings like Trends. Leave blank to use your username.</p>
@@ -100,29 +106,6 @@ export function DetailsPage() {
         <label className="field">Sex<select value={p.sex ?? ""} onChange={(e) => setP({ ...p, sex: e.target.value || null })}><option value="">Not set</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
         <label className="field">Height (cm)<input type="number" min={30} max={272} value={p.height_cm ?? ""} onChange={(e) => setP({ ...p, height_cm: num(e.target.value) })} /></label>
         <label className="field check"><input type="checkbox" checked={!!p.wheelchair} onChange={(e) => setP({ ...p, wheelchair: e.target.checked })} />Wheelchair user</label>
-      </section>
-      <div className="actions"><button className="pill green" onClick={() => save(p)}>Save</button>{msg && <span className="muted">{msg}</span>}</div>
-    </Sub>
-  );
-}
-
-export function GoalsPage() {
-  const { profile, save, msg } = useSaveProfile();
-  const [p, setP] = useState(profile);
-  const num = (v: string) => (v === "" ? null : Number(v));
-  const F = ({ k, label, color, unit, min, max }: { k: "move_goal" | "exercise_goal" | "stand_goal"; label: string; color: string; unit: string; min: number; max: number }) => (
-    <label className="field">
-      <span style={{ color }}>{label}</span>
-      <span className="goalinput"><input type="number" min={min} max={max} placeholder="From Apple Health" value={p[k] ?? ""} onChange={(e) => setP({ ...p, [k]: num(e.target.value) })} /><small>{unit}</small></span>
-    </label>
-  );
-  return (
-    <Sub title="Change Goals">
-      <p className="muted small">Goals set here override the goals from your Apple data. Leave blank to use those.</p>
-      <section className="card form">
-        {F({ k: "move_goal", label: "Move", color: "var(--move)", unit: "CAL", min: 10, max: 10000 })}
-        {F({ k: "exercise_goal", label: "Exercise", color: "var(--exercise)", unit: "MIN", min: 1, max: 1440 })}
-        {F({ k: "stand_goal", label: "Stand", color: "var(--stand)", unit: "HRS", min: 1, max: 24 })}
       </section>
       <div className="actions"><button className="pill green" onClick={() => save(p)}>Save</button>{msg && <span className="muted">{msg}</span>}</div>
     </Sub>
@@ -197,10 +180,10 @@ export function AwardsSetting() {
 }
 
 export const SyncPage = () => <Sub title="iPhone Sync"><HaeSettings /><SyncSettings /></Sub>;
-export const AppearancePage = () => { const { user, onUser } = useHealth(); return <Sub title="Appearance"><Appearance user={user} onUser={onUser} /></Sub>; };
+export const AppearancePage = () => { const { user, onUser } = useHealth(); return <Sub title="Appearance" wide><Appearance user={user} onUser={onUser} /></Sub>; };
 export const PasswordPage = () => { const { user, onUser } = useHealth(); return <Sub title="Change Password"><ChangePassword user={user} onDone={onUser} /></Sub>; };
 export const ImportPage = () => <Sub title="Import Health Data"><Import /></Sub>;
-export const UsersPage = () => <Sub title="Users"><Admin /></Sub>;
+export const UsersPage = () => <Sub title="Users" wide><Admin /></Sub>;
 
 export function useProfile(user: User | null) {
   const [p, setP] = useState<Profile | null>(null);

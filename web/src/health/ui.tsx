@@ -1,5 +1,6 @@
 // Shared iOS-style chrome: large titles, round buttons, sheets, grouped rows.
-import { Link, navigate } from "../router";
+import { Link, navigate, usePath } from "../router";
+import { useEffect, useState } from "react";
 import { AvatarSvg } from "./avatar";
 import { useHealth } from "./ctx";
 import { Chevron } from "./meta";
@@ -83,6 +84,27 @@ export function Row({ to, onClick, icon, label, value, tone, chevron = true }: {
       {chevron && !tone && <Chevron />}
     </>
   );
-  if (to) return <Link to={to} className="row">{inner}</Link>;
+  if (to) return <RowLink to={to}>{inner}</RowLink>;
   return <button className="row" onClick={onClick}>{inner}</button>;
+}
+
+function RowLink({ to, children }: { to: string; children: React.ReactNode }) {
+  const path = usePath();
+  return <Link to={to} className={path === to ? "row active" : "row"} aria-current={path === to ? "page" : undefined}>{children}</Link>;
+}
+
+/** Layout breakpoints (keep in sync with styles.css): tablet >= 768, desktop >= 1200. */
+export const BP = { tablet: 768, desktop: 1200 };
+
+export function useMinWidth(px: number) {
+  const q = `(min-width: ${px}px)`;
+  const [on, setOn] = useState(() => typeof window !== "undefined" && window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const f = () => setOn(m.matches);
+    f();
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, [q]);
+  return on;
 }

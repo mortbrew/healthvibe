@@ -73,7 +73,7 @@ export default function Trends() {
       {!ts ? <p className="muted">Loading…</p> : (
         <>
           <p className="trend-head">{headline(name, ts)}</p>
-          <div className="tiles">
+          <div className="tiles trendgrid">
             {ts.filter((t) => t.enough).map((t) => (
               <Link key={t.key} to={`/summary/trends/${t.key}`} className="tile trendtile">
                 <Arrow up={t.up} color={t.up ? t.color : "var(--muted)"} />
@@ -109,7 +109,7 @@ export function TrendDetail({ k }: { k: string }) {
     return { x, y, max };
   }, [t]);
   return (
-    <div className="page">
+    <div className="page detail">
       <NavBar to="/summary/trends" title={t?.label} />
       {t && chart && (
         <section className="card">
@@ -124,8 +124,18 @@ export function TrendDetail({ k }: { k: string }) {
             <text x={W} y={H + 14} textAnchor="end" className="axis">Today</text>
           </svg>
           <p className="legend"><i style={{ background: t.color }} /> Last 90 days <i style={{ background: "var(--text)" }} /> Last 365 days</p>
-          <p className="muted small">{t.desc}</p>
+          <p className="muted small mobile-only">{t.desc}</p>
         </section>
+      )}
+      {t && chart && (
+        <aside className="card aside desktop-only">
+          <p className="eyebrow">ABOUT THIS TREND</p>
+          <dl className="aside-stats">
+            <div><dt>Last 90 days</dt><dd className="num" style={{ color: t.color }}>{t.fmt ? t.fmt(t.a90) : Math.round(t.a90).toLocaleString()} <small>{t.unit}</small></dd></div>
+            <div><dt>Last 365 days</dt><dd className="num">{t.fmt ? t.fmt(t.a365) : Math.round(t.a365).toLocaleString()} <small>{t.unit}</small></dd></div>
+          </dl>
+          <p className="muted small">{t.desc}</p>
+        </aside>
       )}
       {t && !t.enough && <p className="muted">Not enough data for a trend yet.</p>}
     </div>

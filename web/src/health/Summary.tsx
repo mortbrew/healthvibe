@@ -138,12 +138,14 @@ function Pinned({ metrics }: { metrics: BrowseMetric[] }) {
     await api("/pinned", { method: "PUT", body: { pinned: next } }).catch(() => {});
   };
   return (
-    <section>
+    <section className="pinned">
       <div className="sec-head"><h2>Pinned</h2><button className="link" onClick={() => setEdit(true)}>Edit</button></div>
-      {list.map((m) => {
-        const bm = metrics.find((x) => x.metric === m);
-        return bm ? <PinCard key={m} m={bm} /> : null;
-      })}
+      <div className="pingrid">
+        {list.map((m) => {
+          const bm = metrics.find((x) => x.metric === m);
+          return bm ? <PinCard key={m} m={bm} /> : null;
+        })}
+      </div>
       {pins !== null && !list.length && <p className="muted">Pin metrics from Browse to see them here.</p>}
       {edit && (
         <Sheet title="Edit Pinned" onClose={() => setEdit(false)}>
@@ -231,10 +233,12 @@ function Highlight({ metric, name, color, unit }: { metric: string; name: string
 
 function Highlights() {
   return (
-    <section>
+    <section className="highlights">
       <div className="sec-head"><h2>Highlights</h2><Link to="/summary/trends" className="link">Trends</Link></div>
-      <Highlight metric={STEPS} name="Steps" color="var(--steps)" unit="STEPS" />
-      <Highlight metric={ENERGY} name="Active Energy" color="var(--move)" unit="CAL" />
+      <div className="hlgrid">
+        <Highlight metric={STEPS} name="Steps" color="var(--steps)" unit="STEPS" />
+        <Highlight metric={ENERGY} name="Active Energy" color="var(--move)" unit="CAL" />
+      </div>
       <Link to="/summary/trends" className="card linkrow">See your Trends <ChevronCircle /></Link>
     </section>
   );
@@ -350,7 +354,6 @@ export function ActivityDay({ date }: { date: string }) {
   const r = act.data?.rings?.date === date ? act.data.rings : null;
   const title = `${date === today() ? "Today, " : ""}${new Date(date + "T12:00:00").toLocaleDateString([], { weekday: date === today() ? undefined : "short", month: "short", day: "numeric", year: "numeric" })}`;
   const hmTot = (m: number) => `${Math.floor(m / 60)}H ${Math.round(m % 60)}M`;
-  const GoalBtn = () => <span className="goalbtn" aria-hidden title="Change goals in Account"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></span>;
   return (
     <div className="page activityday">
       <NavBar to="/" title={title} right={<RoundBtn label="Calendar" onClick={() => setCal(true)}><CalIcon /></RoundBtn>} />
@@ -368,20 +371,22 @@ export function ActivityDay({ date }: { date: string }) {
         })}
       </div>
       <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} /></div>
+      <div className="act-charts">
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}/${n0(r.move_goal)}` : "--"}<small>CAL</small></p></div><GoalBtn /></div>
+        <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}/${n0(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>
         <HourChart values={mv.data?.values ?? Array(24).fill(0)} color="var(--move)" kind="bar" />
         <p className="as-total">TOTAL {r ? n0(r.move_kcal) : 0} CAL</p>
       </section>
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Exercise</p><p className="as-val num" style={{ color: "var(--exercise)" }}>{r ? `${n0(r.exercise_min)}/${n0(r.exercise_goal)}` : "--"}<small>MIN</small></p></div><GoalBtn /></div>
+        <div className="as-head"><div><p className="as-label">Exercise</p><p className="as-val num" style={{ color: "var(--exercise)" }}>{r ? `${n0(r.exercise_min)}/${n0(r.exercise_goal)}` : "--"}<small>MIN</small></p></div></div>
         <HourChart values={ex.data?.values ?? Array(24).fill(0)} color="var(--exercise)" kind="bar" />
         <p className="as-total">TOTAL {hmTot(r?.exercise_min ?? 0)}</p>
       </section>
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Stand</p><p className="as-val num" style={{ color: "var(--stand)" }}>{r ? `${n0(r.stand_hours)}/${n0(r.stand_goal)}` : "--"}<small>HRS</small></p></div><GoalBtn /></div>
+        <div className="as-head"><div><p className="as-label">Stand</p><p className="as-val num" style={{ color: "var(--stand)" }}>{r ? `${n0(r.stand_hours)}/${n0(r.stand_goal)}` : "--"}<small>HRS</small></p></div></div>
         <HourChart values={st.data?.values ?? Array(24).fill(0)} color="var(--stand)" kind="block" />
       </section>
+      </div>
       {r && (
         <div className="tiles">
           <div className="tile"><b>Steps</b><p className="big num">{n0(r.steps)}</p></div>
@@ -433,13 +438,13 @@ export function ActivityCalendar({ date, onClose }: { date: string; onClose: () 
     if (cur) setTitle(new Date(cur.dataset.month + "-01T12:00:00").toLocaleDateString([], { month: "long", year: "numeric" }));
   };
   return (
-    <div className="fullsheet" role="dialog" aria-label="Activity calendar">
+    <div className="fullsheet calendar" role="dialog" aria-label="Activity calendar">
       <div className="sheet-head">
         <RoundBtn label="Close" onClick={onClose}><XIcon /></RoundBtn>
         <b>{title}</b>
         <span style={{ width: 36 }} />
       </div>
-      <div className="cal-dow">{"MTWTFSS".split("").map((c, i) => <span key={i}>{c}</span>)}</div>
+      <div className="cal-dow">{[0, 1].map((k) => <div key={k} className={k ? "dowset dup" : "dowset"} aria-hidden={k ? true : undefined}>{"MTWTFSS".split("").map((c, i) => <span key={i}>{c}</span>)}</div>)}</div>
       <div className="cal-scroll" ref={scroller} onScroll={onScroll}>
         {months.map((m) => (
           <div key={m.key} data-month={m.key} className="cal-month">

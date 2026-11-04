@@ -37,7 +37,7 @@ export default function Browse() {
       ) : (
         <>
           <p className="group-title">Health Categories</p>
-          <div className="group">
+          <div className="group browse-cats">
             {CATEGORIES.filter((c) => ms.some((m) => m.category === c.key)).map((c) => (
               <Link key={c.key} to={`/browse/${c.key}`} className="row">
                 <span className="row-icon" style={{ color: c.color }}><CatIcon k={c.key} /></span>
@@ -93,7 +93,7 @@ export function MetricDetail({ metric }: { metric: string }) {
   };
   const head = bk ? bk.title.toUpperCase() : d?.agg === "sum" ? (range === "D" ? "TOTAL" : "DAILY AVERAGE") : "AVERAGE";
   return (
-    <div className="page">
+    <div className="page detail">
       <NavBar to={`/browse/${m?.category ?? ""}`} title={m?.name} right={<button className={pinned ? "pinbtn on" : "pinbtn"} onClick={toggle} aria-pressed={!!pinned}>{pinned ? "★ Pinned" : "☆ Pin"}</button>} />
       <Segmented value={range} options={["D", "W", "M", "6M", "Y"]} onChange={(r) => { setRange(r); setOffset(0); }} />
       <section className="card">
@@ -103,7 +103,7 @@ export function MetricDetail({ metric }: { metric: string }) {
         <RangeChart buckets={d?.buckets ?? []} color={c.color} height={220} selected={sel} onSelect={setSel} onSwipe={(dir) => setOffset(Math.max(0, offset + dir))} dots={d?.agg !== "sum"} />
         <Pager offset={offset} setOffset={setOffset} />
       </section>
-      <div className="group">
+      <div className="group aside">
         <Link to={`/browse/metric/${metric}/all`} className="row"><span className="row-label">Show All Data</span><span className="row-value muted num">{m?.count.toLocaleString()}</span><Chevron /></Link>
         {m && <div className="row static"><span className="row-label muted">First recorded</span><span className="row-value">{m.first?.slice(0, 10)}</span></div>}
       </div>
