@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod config;
+pub mod dashboards;
 pub mod db;
 pub mod hae;
 pub mod import;

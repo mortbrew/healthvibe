@@ -18,7 +18,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use healthvibe_core::{auth, import, stats};
+use healthvibe_core::{auth, dashboards, import, stats};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
@@ -45,6 +45,15 @@ pub fn routes() -> Router<AppState> {
         .route("/dashboard/heart", get(heart))
         .route("/dashboard/sleep", get(sleep))
         .route("/dashboard/body", get(body))
+        .route("/metrics", get(metrics))
+        .route("/series", get(series))
+        .route("/dashboards", get(list_dashboards).post(create_dashboard))
+        .route(
+            "/dashboards/{id}",
+            get(get_dashboard)
+                .put(update_dashboard)
+                .delete(delete_dashboard),
+        )
         .merge(crate::sync::routes())
 }
 
@@ -431,4 +440,127 @@ async fn body(State(st): State<AppState>, User(u): User, Query(r): Query<Range>)
     Ok(Json(json!(
         stats::body(&st.db, u.id, &end, r.days(90)).await?
     )))
+}
+
+// ---- custom dashboards ----------------------------------------------------
+
+async fn metrics(State(st): State<AppState>, User(u): User) -> ApiResult {
+    Ok(Json(
+        json!({ "metrics": dashboards::metrics(&st.db, u.id).await? }),
+    ))
+}
+
+#[derive(Deserialize)]
+struct SeriesQuery {
+    metric: String,
+    agg: Option<String>,
+    bucket: Option<String>,
+    end: Option<String>,
+    days: Option<i64>,
+}
+
+async fn series(
+    State(st): State<AppState>,
+    User(u): User,
+    Query(q): Query<SeriesQuery>,
+) -> ApiResult {
+    let agg = q
+        .agg
+        .as_deref()
+        .unwrap_or_else(|| dashboards::default_agg(&q.metric));
+    let bucket = q.bucket.as_deref().unwrap_or("day");
+    if !["sum", "avg", "count"].contains(&agg) || !["day", "week", "month"].contains(&bucket) {
+        return Err(bad("invalid_query"));
+    }
+    if let Some(e) = &q.end {
+        if !chrono_ok(e) {
+            return Err(bad("invalid_date"));
+        }
+    }
+    let days = q.days.unwrap_or(30).clamp(1, 3650);
+    Ok(Json(
+        dashboards::series(&st.db, u.id, &q.metric, agg, bucket, q.end, days).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct DashboardBody {
+    name: Option<String>,
+    widgets: Option<Vec<dashboards::Widget>>,
+}
+
+fn clean_name(n: &str) -> Result<String, ApiError> {
+    let n = n.trim();
+    if n.is_empty() || n.chars().count() > 60 {
+        return Err(bad("invalid_name"));
+    }
+    Ok(n.to_string())
+}
+
+fn not_found() -> ApiError {
+    ApiError(StatusCode::NOT_FOUND, "not_found")
+}
+
+async fn list_dashboards(State(st): State<AppState>, User(u): User) -> ApiResult {
+    Ok(Json(
+        json!({ "dashboards": dashboards::list(&st.db, u.id).await? }),
+    ))
+}
+
+async fn create_dashboard(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(b): Json<DashboardBody>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let name = clean_name(b.name.as_deref().unwrap_or(""))?;
+    let ws = b.widgets.unwrap_or_default();
+    dashboards::validate(&ws).map_err(bad)?;
+    if dashboards::count(&st.db, u.id).await? >= dashboards::MAX_DASHBOARDS {
+        return Err(bad("too_many_dashboards"));
+    }
+    let id = dashboards::create(&st.db, u.id, &name, &ws).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "dashboard": dashboards::get(&st.db, u.id, id).await? })),
+    ))
+}
+
+async fn get_dashboard(
+    State(st): State<AppState>,
+    User(u): User,
+    Path(id): Path<i64>,
+) -> ApiResult {
+    let d = dashboards::get(&st.db, u.id, id)
+        .await?
+        .ok_or_else(not_found)?;
+    Ok(Json(json!({ "dashboard": d })))
+}
+
+async fn update_dashboard(
+    State(st): State<AppState>,
+    User(u): User,
+    Path(id): Path<i64>,
+    Json(b): Json<DashboardBody>,
+) -> ApiResult {
+    let name = b.name.as_deref().map(clean_name).transpose()?;
+    if let Some(ws) = &b.widgets {
+        dashboards::validate(ws).map_err(bad)?;
+    }
+    if !dashboards::update(&st.db, u.id, id, name.as_deref(), b.widgets.as_deref()).await? {
+        return Err(not_found());
+    }
+    Ok(Json(
+        json!({ "dashboard": dashboards::get(&st.db, u.id, id).await? }),
+    ))
+}
+
+async fn delete_dashboard(
+    State(st): State<AppState>,
+    User(u): User,
+    Path(id): Path<i64>,
+) -> ApiResult {
+    if !dashboards::delete(&st.db, u.id, id).await? {
+        return Err(not_found());
+    }
+    Ok(Json(json!({ "ok": true })))
 }

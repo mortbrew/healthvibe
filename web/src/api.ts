@@ -46,6 +46,10 @@ export const messages: Record<string, string> = {
   missing_file: "Pick an export.zip file first.",
   no_metrics: "Choose at least one thing to sync.",
   choose_metrics_first: "Choose what to sync in Settings first.",
+  invalid_widget: "That widget isn't valid. Pick a metric and try again.",
+  too_many_widgets: "A dashboard can hold up to 40 widgets.",
+  too_many_dashboards: "You can have up to 50 dashboards.",
+  invalid_name: "Dashboard names need 1 to 60 characters.",
 };
 
 export const explain = (e: unknown) =>
@@ -126,3 +130,33 @@ export type HaeInfo = {
   max_request_bytes: number;
 };
 export type HaeToken = { token: string; url: string; public_url_set: boolean; header: string };
+
+export type Widget = {
+  id: string;
+  kind: "line" | "bar" | "stat" | "activity" | "sleep" | "body" | "heart";
+  metric?: string;
+  title?: string;
+  days: number;
+  bucket: "day" | "week" | "month";
+  agg?: "sum" | "avg" | "count";
+  size: number;
+};
+export type Dashboard = { id: number; name: string; position: number; widgets: Widget[] };
+export type Metric = {
+  metric: string;
+  name: string;
+  unit: string | null;
+  count: number;
+  first: string | null;
+  last: string | null;
+  agg: "sum" | "avg" | "count";
+};
+export type SeriesData = {
+  metric: string;
+  name: string;
+  unit: string | null;
+  agg: "sum" | "avg" | "count";
+  bucket: string;
+  end: string | null;
+  points: DayValue[];
+};

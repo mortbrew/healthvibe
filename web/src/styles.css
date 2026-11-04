@@ -174,3 +174,28 @@ img.qr { width: 220px; height: 220px; border-radius: 12px; background: #fff; pad
 .sponsor { margin-top: 1.5rem; }
 .pulse { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--move); animation: hvpulse 1.2s infinite; }
 @keyframes hvpulse { 50% { opacity: .2; } }
+
+/* Custom dashboards: a 4-column grid; each widget spans 1-4 columns. */
+.dashhead { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
+.dashtools { align-items: center; }
+.dgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+.dgrid > .widget { grid-column: span var(--span, 2); display: flex; flex-direction: column; min-width: 0; }
+.dgrid .card { margin: 0; flex: 1; }
+.widget.editing .card { outline: 2px dashed var(--border); outline-offset: 2px; }
+.wtools { display: flex; align-items: center; gap: 0.1rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
+.wtools button { padding: 0.15rem 0.5rem; }
+.editbar { align-items: center; padding: 0.7rem 1rem; }
+.danger { color: var(--heart) !important; }
+.wform .grow { flex: 1; min-width: 220px; }
+select {
+  font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 0.55rem 0.6rem; min-width: 0;
+}
+.stat { padding: 0.75rem 0 0.25rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.statval { font-size: 2.6rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.statval small { font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.trend { font-weight: 650; font-size: 0.9rem; }
+/* Neutral: higher is not always better (resting HR, weight). */
+.trend.up, .trend.down { color: var(--accent); }
+@media (max-width: 1099px) { .dgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dgrid > .widget { grid-column: span 2; } .dgrid > .widget[data-size="1"] { grid-column: span 1; } }
+@media (max-width: 760px) { .dgrid { grid-template-columns: 1fr; } .dgrid > .widget { grid-column: auto; } }
