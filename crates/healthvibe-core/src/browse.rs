@@ -223,6 +223,15 @@ fn longest_run(days: &[(String, bool)]) -> (usize, Option<String>) {
     (best, end)
 }
 
+/// The goal in effect on `day`: the most recent goal on or before it, else the default.
+pub(crate) fn goal_on(goals: &[(String, f64)], day: &str) -> f64 {
+    goals
+        .iter()
+        .rev()
+        .find(|g| g.0.as_str() <= day)
+        .map_or(crate::stats::DEFAULT_MOVE_GOAL, |g| g.1)
+}
+
 /// healthvibe's own awards (Apple's are not in the export), newest-earned first.
 pub async fn awards(db: &SqlitePool, uid: i64) -> anyhow::Result<Vec<Award>> {
     use crate::stats::{daily_sum, ACTIVE_ENERGY, STEPS};
@@ -231,12 +240,14 @@ pub async fn awards(db: &SqlitePool, uid: i64) -> anyhow::Result<Vec<Award>> {
     };
     let steps = daily_sum(db, uid, STEPS, &end, 3650).await?;
     let energy = daily_sum(db, uid, ACTIVE_ENERGY, &end, 3650).await?;
-    let goal: f64 = sqlx::query_scalar("SELECT move_kcal FROM activity_goals WHERE user_id = ? AND move_kcal IS NOT NULL ORDER BY date DESC LIMIT 1")
-        .bind(uid).fetch_optional(db).await?.unwrap_or(crate::stats::DEFAULT_MOVE_GOAL);
+    // Each day is judged against that day's own Move goal, not the latest one.
+    let goals: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT date, move_kcal FROM activity_goals WHERE user_id = ? AND move_kcal IS NOT NULL ORDER BY date",
+    ).bind(uid).fetch_all(db).await?;
     let mut out = vec![];
     let move_days: Vec<(String, bool)> = energy
         .iter()
-        .map(|d| (d.date.clone(), d.value >= goal))
+        .map(|d| (d.date.clone(), d.value >= goal_on(&goals, &d.date)))
         .collect();
     let (run, run_end) = longest_run(&move_days);
     if run >= 7 {
@@ -300,7 +311,8 @@ pub async fn rings(
     rings_span(db, uid, start, end, 400).await
 }
 
-/// Like [`rings`] with a caller-chosen day cap. Profile goal overrides win.
+/// Like [`rings`] with a caller-chosen day cap. Each day uses its own goal from
+/// ActivitySummary data (most recent on or before that day), else the defaults.
 pub async fn rings_span(
     db: &SqlitePool,
     uid: i64,
@@ -335,7 +347,6 @@ pub async fn rings_span(
     let goals: Vec<Goal> = sqlx::query_as(
         "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals WHERE user_id = ? AND date <= ? ORDER BY date",
     ).bind(uid).bind(end).fetch_all(db).await?;
-    let (om, oe, os) = crate::profile::goal_overrides(db, uid).await?;
     let val = |v: &[DayValue], d: &str| v.iter().find(|x| x.date == d).map_or(0.0, |x| x.value);
     Ok((0..days)
         .map(|i| {
@@ -343,11 +354,11 @@ pub async fn rings_span(
             let g = goals.iter().rev().find(|g| g.0 <= d);
             RingDay {
                 move_kcal: val(&energy, &d),
-                move_goal: om.or(g.and_then(|g| g.1)).unwrap_or(DEFAULT_MOVE_GOAL),
+                move_goal: g.and_then(|g| g.1).unwrap_or(DEFAULT_MOVE_GOAL),
                 exercise_min: val(&exercise, &d),
-                exercise_goal: oe.or(g.and_then(|g| g.2)).unwrap_or(DEFAULT_EXERCISE_GOAL),
+                exercise_goal: g.and_then(|g| g.2).unwrap_or(DEFAULT_EXERCISE_GOAL),
                 stand_hours: stand.iter().find(|x| x.0 == d).map_or(0.0, |x| x.1),
-                stand_goal: os.or(g.and_then(|g| g.3)).unwrap_or(DEFAULT_STAND_GOAL),
+                stand_goal: g.and_then(|g| g.3).unwrap_or(DEFAULT_STAND_GOAL),
                 workout: workouts.contains(&d),
                 date: d,
             }
@@ -360,6 +371,15 @@ mod tests {
     use super::category;
     #[allow(unused_imports)]
     use super::longest_run;
+    #[test]
+    fn goal_on_uses_most_recent_goal_on_or_before_day() {
+        let g = vec![("2026-01-05".to_string(), 400.0), ("2026-01-10".to_string(), 900.0)];
+        assert_eq!(super::goal_on(&g, "2026-01-01"), crate::stats::DEFAULT_MOVE_GOAL);
+        assert_eq!(super::goal_on(&g, "2026-01-05"), 400.0);
+        assert_eq!(super::goal_on(&g, "2026-01-09"), 400.0);
+        assert_eq!(super::goal_on(&g, "2026-01-10"), 900.0);
+        assert_eq!(super::goal_on(&g, "2026-02-01"), 900.0);
+    }
     #[test]
     fn categories() {
         assert_eq!(category("HKQuantityTypeIdentifierStepCount"), "activity");

@@ -639,8 +639,7 @@ pub async fn refresh(db: &SqlitePool, uid: i64) -> anyhow::Result<Vec<AwardOut>>
     let list = compute(&days, &workouts);
     let stamp: String = sqlx::query_scalar(
         "SELECT (SELECT COUNT(*) || ':' || IFNULL(MAX(id), 0) FROM readings WHERE user_id = ?1) || '/' ||
-                (SELECT COUNT(*) FROM activity_goals WHERE user_id = ?1) || '/' ||
-                (SELECT IFNULL(move_goal, '') || IFNULL(exercise_goal, '') || IFNULL(stand_goal, '') FROM profiles WHERE user_id = ?1)",
+                (SELECT COUNT(*) FROM activity_goals WHERE user_id = ?1)",
     ).bind(uid).fetch_one(db).await.unwrap_or_default();
     let old: Option<String> =
         sqlx::query_scalar("SELECT stamp FROM awards_state WHERE user_id = ?")

@@ -1,4 +1,5 @@
-//! Optional per-user profile: details, avatar config, goal overrides, units.
+//! Optional per-user profile: details, avatar config, units.
+//! Ring goals are never set here: they come only from Apple ActivitySummary data.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,9 +15,6 @@ pub struct Profile {
     pub wheelchair: Option<bool>,
     /// Avatar builder config (opaque JSON object rendered client-side).
     pub avatar: Option<Value>,
-    pub move_goal: Option<f64>,
-    pub exercise_goal: Option<f64>,
-    pub stand_goal: Option<f64>,
     /// {distance: mi|km, weight: lb|kg, energy: cal|kj, temp: f|c}
     pub units: Option<Value>,
 }
@@ -28,15 +26,12 @@ type Row = (
     Option<f64>,
     Option<bool>,
     Option<String>,
-    Option<f64>,
-    Option<f64>,
-    Option<f64>,
     Option<String>,
 );
 
 pub async fn get(db: &SqlitePool, uid: i64) -> anyhow::Result<Profile> {
     let r: Option<Row> = sqlx::query_as(
-        "SELECT display_name, birth_date, sex, height_cm, wheelchair, avatar, move_goal, exercise_goal, stand_goal, units FROM profiles WHERE user_id = ?",
+        "SELECT display_name, birth_date, sex, height_cm, wheelchair, avatar, units FROM profiles WHERE user_id = ?",
     ).bind(uid).fetch_optional(db).await?;
     let Some(r) = r else {
         return Ok(Profile::default());
@@ -49,10 +44,7 @@ pub async fn get(db: &SqlitePool, uid: i64) -> anyhow::Result<Profile> {
         height_cm: r.3,
         wheelchair: r.4,
         avatar: json(r.5),
-        move_goal: r.6,
-        exercise_goal: r.7,
-        stand_goal: r.8,
-        units: json(r.9),
+        units: json(r.6),
     })
 }
 
@@ -83,11 +75,7 @@ pub fn validate(mut p: Profile) -> Result<Profile, &'static str> {
     let range = |v: Option<f64>, lo: f64, hi: f64| {
         v.is_none_or(|v| v.is_finite() && (lo..=hi).contains(&v))
     };
-    if !range(p.height_cm, 30.0, 272.0)
-        || !range(p.move_goal, 10.0, 10_000.0)
-        || !range(p.exercise_goal, 1.0, 1440.0)
-        || !range(p.stand_goal, 1.0, 24.0)
-    {
+    if !range(p.height_cm, 30.0, 272.0) {
         return Err("invalid_profile");
     }
     for v in [&p.avatar, &p.units] {
@@ -113,29 +101,15 @@ impl YearOk for chrono::NaiveDate {
 pub async fn put(db: &SqlitePool, uid: i64, p: &Profile) -> anyhow::Result<()> {
     let s = |v: &Option<Value>| v.as_ref().map(|v| v.to_string());
     sqlx::query(
-        "INSERT INTO profiles (user_id, display_name, birth_date, sex, height_cm, wheelchair, avatar, move_goal, exercise_goal, stand_goal, units)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO profiles (user_id, display_name, birth_date, sex, height_cm, wheelchair, avatar, units)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET display_name = excluded.display_name, birth_date = excluded.birth_date, sex = excluded.sex,
-           height_cm = excluded.height_cm, wheelchair = excluded.wheelchair, avatar = excluded.avatar, move_goal = excluded.move_goal,
-           exercise_goal = excluded.exercise_goal, stand_goal = excluded.stand_goal, units = excluded.units",
+           height_cm = excluded.height_cm, wheelchair = excluded.wheelchair, avatar = excluded.avatar, units = excluded.units",
     )
     .bind(uid).bind(&p.display_name).bind(&p.birth_date).bind(&p.sex).bind(p.height_cm).bind(p.wheelchair)
-    .bind(s(&p.avatar)).bind(p.move_goal).bind(p.exercise_goal).bind(p.stand_goal).bind(s(&p.units))
+    .bind(s(&p.avatar)).bind(s(&p.units))
     .execute(db).await?;
     Ok(())
-}
-
-pub async fn goal_overrides(
-    db: &SqlitePool,
-    uid: i64,
-) -> anyhow::Result<(Option<f64>, Option<f64>, Option<f64>)> {
-    Ok(sqlx::query_as(
-        "SELECT move_goal, exercise_goal, stand_goal FROM profiles WHERE user_id = ?",
-    )
-    .bind(uid)
-    .fetch_optional(db)
-    .await?
-    .unwrap_or((None, None, None)))
 }
 
 #[cfg(test)]
@@ -164,7 +138,7 @@ mod tests {
         })
         .is_err());
         assert!(validate(Profile {
-            stand_goal: Some(30.0),
+            height_cm: Some(500.0),
             ..Default::default()
         })
         .is_err());

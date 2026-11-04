@@ -182,19 +182,29 @@ async fn awards_opt_in_perfect_week_streak_and_isolation() {
         .unwrap();
     assert!(stored >= 6);
 
-    // A Move goal override re-computes (stamp changes) and raises the bar.
-    let (s, _, _) = call(
+    // Per-day goals: a higher Move goal from 2026-01-13 on applies only from
+    // that day. The earlier week still counts against its own (default) goal.
+    sqlx::query("INSERT INTO activity_goals (user_id, date, move_kcal) VALUES (1, '2026-01-13', 1000)")
+        .execute(&db)
+        .await
+        .unwrap();
+    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
+    assert_eq!(
+        find(&v, "perfect_week_move")["earned"]["first"],
+        "2026-01-11"
+    );
+    // Days 5-11 (7) + 14 (2600 >= 1000); 13 (600 < 1000) no longer closes.
+    assert_eq!(find(&v, "close_move")["earned"]["count"], 8);
+    let (_, v, _) = call(
         &app,
-        "PUT",
-        "/api/v1/profile",
+        "GET",
+        "/api/v1/rings?start=2026-01-11&end=2026-01-13",
         Some(&admin),
-        Some(json!({"move_goal": 1000})),
+        None,
     )
     .await;
-    assert_eq!(s, 200);
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    assert!(find(&v, "perfect_week_move")["earned"].is_null());
-    assert_eq!(find(&v, "close_move")["earned"]["count"], 1);
+    assert_eq!(v["days"][0]["move_goal"], 500.0);
+    assert_eq!(v["days"][2]["move_goal"], 1000.0);
 
     // Sam sees nothing of admin's data.
     call(
@@ -292,13 +302,14 @@ async fn profile_round_trip_isolation_and_validation() {
     let (_, v, _) = call(&app, "GET", "/api/v1/profile", Some(&admin), None).await;
     assert!(v["profile"]["display_name"].is_null());
     let p = json!({"display_name": " Toby ", "birth_date": "1990-02-03", "sex": "male", "height_cm": 180.5,
-        "wheelchair": false, "avatar": {"face": 1, "hair": 3}, "units": {"distance": "km"}, "stand_goal": 10});
+        "wheelchair": false, "avatar": {"face": 1, "hair": 3}, "units": {"distance": "km"}});
     let (s, v, _) = call(&app, "PUT", "/api/v1/profile", Some(&admin), Some(p)).await;
     assert_eq!(s, 200);
     assert_eq!(v["profile"]["display_name"], "Toby");
     let (_, v, _) = call(&app, "GET", "/api/v1/profile", Some(&admin), None).await;
     assert_eq!(v["profile"]["avatar"]["hair"], 3);
     assert_eq!(v["profile"]["height_cm"], 180.5);
+    assert!(v["profile"].get("stand_goal").is_none());
     let (_, v, _) = call(&app, "GET", "/api/v1/profile", Some(&sam), None).await;
     assert!(v["profile"]["display_name"].is_null());
     for bad in [
@@ -314,7 +325,11 @@ async fn profile_round_trip_isolation_and_validation() {
             400
         );
     }
-    // Stand goal override reaches the rings endpoint.
+    // Goals come only from ActivitySummary data: an earlier day's goal carries forward.
+    sqlx::query("INSERT INTO activity_goals (user_id, date, stand_hours) VALUES (1, '2026-01-01', 10)")
+        .execute(&db)
+        .await
+        .unwrap();
     reading(&db, 1, ENERGY, "10", "2026-01-05", 0).await;
     let (_, v, _) = call(
         &app,
