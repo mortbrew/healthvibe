@@ -135,7 +135,46 @@ fn to_row(tag: &[u8], a: &BTreeMap<String, String>) -> Option<Row> {
     })
 }
 
+/// A `<Workout>` whose children are still being read.
+struct OpenWorkout {
+    attrs: BTreeMap<String, String>,
+    kids: crate::workouts::ExportChildren,
+    /// Element names below the workout (empty = direct child level).
+    stack: Vec<Vec<u8>>,
+}
+
+impl OpenWorkout {
+    /// Record a child element. `parent` is the element directly above it
+    /// (`None` = the workout itself).
+    fn child(&mut self, name: &[u8], a: BTreeMap<String, String>) {
+        let parent = self.stack.last().map(|p| p.as_slice());
+        match (parent, name) {
+            (None, b"WorkoutStatistics") => self.kids.statistics.push(a),
+            (None, b"WorkoutEvent") => self.kids.events.push(a),
+            (None, b"MetadataEntry") => {
+                if let (Some(k), Some(v)) = (a.get("key"), a.get("value")) {
+                    self.kids.metadata.push((k.clone(), v.clone()));
+                }
+            }
+            (Some(b"WorkoutRoute"), b"FileReference") => {
+                if let Some(path) = a.get("path") {
+                    self.kids.route_files.push(path.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn finish(self) -> Option<Item> {
+        crate::workouts::from_export(&self.attrs, &self.kids).map(Item::Workout)
+    }
+}
+
 /// Stream-parse export.xml, calling `sink` with batches of rows.
+///
+/// `<Workout>` elements are held open until their end tag so their
+/// `<WorkoutStatistics>`, `<WorkoutEvent>`, metadata and route file
+/// references land on the same workout row.
 pub fn parse_export<R: BufRead>(
     r: R,
     mut sink: impl FnMut(Vec<Item>) -> anyhow::Result<()>,
@@ -143,33 +182,65 @@ pub fn parse_export<R: BufRead>(
     let mut reader = Reader::from_reader(r);
     let mut buf = Vec::with_capacity(4096);
     let mut batch = Vec::with_capacity(BATCH);
+    let mut open: Option<OpenWorkout> = None;
     loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) => {
-                let name = e.name();
-                let a = attrs(&e);
-                if name.as_ref() == b"ActivitySummary" {
-                    if let Some(g) = to_goal(&a) {
-                        batch.push(Item::Goal(g));
+        let ev = reader.read_event_into(&mut buf)?;
+        let (e, empty) = match &ev {
+            Event::Start(e) => (Some(e), false),
+            Event::Empty(e) => (Some(e), true),
+            Event::End(end) => {
+                if let Some(w) = open.as_mut() {
+                    if w.stack.pop().is_none() && end.name().as_ref() == b"Workout" {
+                        if let Some(item) = open.take().and_then(OpenWorkout::finish) {
+                            batch.push(item);
+                        }
                     }
-                } else if name.as_ref() == b"Workout" {
-                    if let Some(r) = to_row(name.as_ref(), &a) {
-                        batch.push(Item::Row(r));
-                    }
-                    if let Some(w) = crate::workouts::from_export_attrs(&a, &std::collections::BTreeMap::new()) {
-                        batch.push(Item::Workout(w));
-                    }
-                } else if let Some(r) = to_row(name.as_ref(), &a) {
-                    batch.push(Item::Row(r));
                 }
-                if batch.len() >= BATCH {
-                    sink(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)))?;
-                }
+                (None, false)
             }
             Event::Eof => break,
-            _ => {}
+            _ => (None, false),
+        };
+        if let Some(e) = e {
+            let name = e.name();
+            let name = name.as_ref();
+            let a = attrs(e);
+            if let Some(w) = open.as_mut() {
+                w.child(name, a);
+                if !empty {
+                    w.stack.push(name.to_vec());
+                }
+            } else if name == b"ActivitySummary" {
+                if let Some(g) = to_goal(&a) {
+                    batch.push(Item::Goal(g));
+                }
+            } else if name == b"Workout" {
+                if let Some(r) = to_row(name, &a) {
+                    batch.push(Item::Row(r));
+                }
+                let w = OpenWorkout {
+                    attrs: a,
+                    kids: Default::default(),
+                    stack: vec![],
+                };
+                if empty {
+                    if let Some(item) = w.finish() {
+                        batch.push(item);
+                    }
+                } else {
+                    open = Some(w);
+                }
+            } else if let Some(r) = to_row(name, &a) {
+                batch.push(Item::Row(r));
+            }
+        }
+        if batch.len() >= BATCH {
+            sink(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)))?;
         }
         buf.clear();
+    }
+    if let Some(item) = open.take().and_then(OpenWorkout::finish) {
+        batch.push(item);
     }
     if !batch.is_empty() {
         sink(batch)?;
@@ -407,6 +478,100 @@ mod tests {
         z.write_all(FIXTURE.as_bytes()).unwrap();
         z.finish().unwrap();
         p
+    }
+
+    /// Synthetic iOS 16+-style workout with children. Not real health data.
+    const RICH_WORKOUT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<HealthData locale="en_US">
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Synthetic Watch" unit="count" startDate="2024-03-01 07:00:00 -0500" endDate="2024-03-01 07:05:00 -0500" value="100">
+  <MetadataEntry key="RecordOnly" value="x"/>
+ </Record>
+ <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="31.5" durationUnit="min" sourceName="Synthetic Watch" startDate="2024-03-01 18:00:00 -0500" endDate="2024-03-01 18:31:30 -0500">
+  <MetadataEntry key="HKIndoorWorkout" value="0"/>
+  <MetadataEntry key="HKElevationAscended" value="4200 cm"/>
+  <MetadataEntry key="HKExternalUUID" value="SYN-1"/>
+  <WorkoutEvent type="HKWorkoutEventTypeSegment" date="2024-03-01 18:00:00 -0500" duration="10.5" durationUnit="min"/>
+  <WorkoutEvent type="HKWorkoutEventTypePause" date="2024-03-01 18:12:00 -0500"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierActiveEnergyBurned" startDate="2024-03-01 18:00:00 -0500" endDate="2024-03-01 18:31:30 -0500" sum="312.4" unit="Cal"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierBasalEnergyBurned" startDate="2024-03-01 18:00:00 -0500" endDate="2024-03-01 18:31:30 -0500" sum="40.1" unit="Cal"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierRestingHeartRate" average="55" unit="count/min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" startDate="2024-03-01 18:00:00 -0500" endDate="2024-03-01 18:31:30 -0500" average="151.2" minimum="98" maximum="176" unit="count/min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" startDate="2024-03-01 18:00:00 -0500" endDate="2024-03-01 18:31:30 -0500" sum="5.21" unit="km"/>
+  <WorkoutRoute sourceName="Synthetic Watch" startDate="2024-03-01 18:00:00 -0500" endDate="2024-03-01 18:31:30 -0500">
+   <MetadataEntry key="RouteOnly" value="y"/>
+   <FileReference path="/workout-routes/route_2024-03-01_6.00pm.gpx"/>
+  </WorkoutRoute>
+ </Workout>
+ <Workout workoutActivityType="HKWorkoutActivityTypeYoga" duration="20" durationUnit="min" sourceName="Synthetic Watch" startDate="2024-03-02 08:00:00 -0500" endDate="2024-03-02 08:20:00 -0500"/>
+</HealthData>"#;
+
+    fn workouts_of(xml: &str) -> Vec<crate::workouts::Workout> {
+        let mut out = vec![];
+        parse_export(xml.as_bytes(), |b| {
+            out.extend(b.into_iter().filter_map(|i| match i {
+                Item::Workout(w) => Some(w),
+                _ => None,
+            }));
+            Ok(())
+        })
+        .unwrap();
+        out
+    }
+
+    #[test]
+    fn workout_statistics_events_metadata_are_stored_as_given() {
+        let ws = workouts_of(RICH_WORKOUT);
+        assert_eq!(ws.len(), 2);
+        let w = &ws[0];
+        assert_eq!(w.activity_type, "HKWorkoutActivityTypeRunning");
+        assert_eq!(w.duration_min, Some(31.5));
+        assert_eq!(w.active_kcal, Some(312.4));
+        // Exact HeartRate statistic, not RestingHeartRate.
+        assert_eq!((w.avg_hr, w.max_hr), (Some(151.2), Some(176.0)));
+        assert!((w.distance_m.unwrap() - 5210.0).abs() < 1e-6);
+        assert!((w.elevation_m.unwrap() - 42.0).abs() < 1e-9);
+        assert_eq!(w.external_id.as_deref(), Some("SYN-1"));
+        // Nothing derived: no total from active+basal, no HR zones.
+        assert_eq!(w.total_kcal, None);
+        assert!(w.zone1_min.is_none() && w.zone5_min.is_none());
+        let d: serde_json::Value = serde_json::from_str(w.detail_json.as_deref().unwrap()).unwrap();
+        assert_eq!(d["statistics"].as_array().unwrap().len(), 5);
+        assert_eq!(d["statistics"][3]["minimum"], "98");
+        assert_eq!(d["events"].as_array().unwrap().len(), 2);
+        assert_eq!(d["events"][1]["type"], "HKWorkoutEventTypePause");
+        assert_eq!(d["metadata"]["HKIndoorWorkout"], "0");
+        // Record / route metadata never leaks onto the workout.
+        assert!(d["metadata"].get("RecordOnly").is_none());
+        assert!(d["metadata"].get("RouteOnly").is_none());
+        assert_eq!(d["route_files"][0], "/workout-routes/route_2024-03-01_6.00pm.gpx");
+        // A self-closing workout still parses, with no detail.
+        assert_eq!(ws[1].activity_type, "HKWorkoutActivityTypeYoga");
+        assert_eq!(ws[1].detail_json, None);
+    }
+
+    #[tokio::test]
+    async fn rich_workout_import_upserts_detail() {
+        let db = crate::db::open_memory().await.unwrap();
+        let p = std::env::temp_dir().join(format!("hv-test-{}.zip", rand::random::<u64>()));
+        {
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+            z.start_file("export.xml", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            z.write_all(RICH_WORKOUT.as_bytes()).unwrap();
+            z.finish().unwrap();
+        }
+        import_zip(&db, 1, &p).await.unwrap();
+        import_zip(&db, 1, &p).await.unwrap();
+        let rows: Vec<(String, Option<f64>, Option<String>)> = sqlx::query_as(
+            "SELECT activity_type, avg_hr, detail_json FROM workouts WHERE user_id = 1 ORDER BY start_utc",
+        )
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(rows.len(), 2, "re-import does not duplicate");
+        assert_eq!(rows[0].1, Some(151.2));
+        assert!(rows[0].2.as_deref().unwrap().contains("HKWorkoutEventTypeSegment"));
     }
 
     #[test]

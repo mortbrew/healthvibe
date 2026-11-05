@@ -14,6 +14,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Workout {
@@ -283,43 +284,131 @@ pub fn from_hae(w: &Value, channel: &str) -> Result<Workout, String> {
     })
 }
 
-/// Per-statistic type -> (sum, avg, max) from export.xml WorkoutStatistics.
-type ExportStats = std::collections::BTreeMap<String, (Option<f64>, Option<f64>, Option<f64>)>;
+/// Children of an export.xml `<Workout>` element, kept as Apple wrote them
+/// (attribute maps of raw strings). Only values Apple provides directly are
+/// copied into columns; nothing is recomputed from them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExportChildren {
+    /// `<WorkoutStatistics>` attributes (type, startDate, endDate, average,
+    /// minimum, maximum, sum, unit).
+    pub statistics: Vec<BTreeMap<String, String>>,
+    /// `<WorkoutEvent>` attributes (type, date, duration, durationUnit).
+    pub events: Vec<BTreeMap<String, String>>,
+    /// Direct `<MetadataEntry key value>` children of the workout.
+    pub metadata: Vec<(String, String)>,
+    /// `<WorkoutRoute><FileReference path>` paths (the GPX files themselves
+    /// are not imported).
+    pub route_files: Vec<String>,
+}
 
-/// Build from export.xml Workout attributes (+ optional stats map).
-pub fn from_export_attrs(
-    attrs: &std::collections::BTreeMap<String, String>,
-    stats: &ExportStats,
-) -> Option<Workout> {
+impl ExportChildren {
+    fn is_empty(&self) -> bool {
+        self.statistics.is_empty()
+            && self.events.is_empty()
+            && self.metadata.is_empty()
+            && self.route_files.is_empty()
+    }
+
+    /// First statistic of exactly `HKQuantityTypeIdentifier{name}`.
+    fn stat(&self, name: &str) -> Option<&BTreeMap<String, String>> {
+        let want = format!("HKQuantityTypeIdentifier{name}");
+        self.statistics
+            .iter()
+            .find(|s| s.get("type").is_some_and(|t| *t == want))
+    }
+}
+
+fn f(a: &BTreeMap<String, String>, k: &str) -> Option<f64> {
+    a.get(k)?.trim().parse::<f64>().ok().filter(|x| x.is_finite())
+}
+
+/// Energy in kcal when Apple's unit is kcal/Cal; other units stay NULL in the
+/// column (the raw value is still in detail_json).
+fn kcal(x: Option<f64>, unit: Option<&String>) -> Option<f64> {
+    match unit.map(|u| u.as_str()) {
+        None | Some("kcal") | Some("Cal") => x,
+        Some("kJ") => x.map(|v| v / 4.184),
+        _ => None,
+    }
+}
+
+/// Parse a metadata quantity like `"1234 cm"` into (value, unit).
+fn meta_qty(s: &str) -> Option<(f64, String)> {
+    let mut it = s.split_whitespace();
+    let v: f64 = it.next()?.parse().ok()?;
+    Some((v, it.next().unwrap_or("").to_string()))
+}
+
+/// Build from an export.xml `<Workout>` and its children.
+///
+/// Column sources (all taken as given, only unit-normalised):
+/// - duration: `duration`/`durationUnit` attrs
+/// - distance: `totalDistance` attr, else the Distance* statistic `sum`
+/// - total energy: `totalEnergyBurned` attr (older exports only)
+/// - active energy: ActiveEnergyBurned statistic `sum`
+/// - avg/max HR: HeartRate statistic `average`/`maximum`
+/// - elevation: `HKElevationAscended` metadata
+///
+/// Everything else (all statistics incl. min, events, metadata, route file
+/// refs) is stored verbatim in `detail_json`.
+pub fn from_export(attrs: &BTreeMap<String, String>, kids: &ExportChildren) -> Option<Workout> {
     let activity = attrs.get("workoutActivityType")?.clone();
     let (start_utc, _, local_start) = crate::import::parse_date(attrs.get("startDate")?)?;
     let (end_utc, _, local_end) = crate::import::parse_date(attrs.get("endDate")?)?;
     let source = attrs.get("sourceName").cloned().unwrap_or_default();
-    let duration_min = attrs.get("duration").and_then(|d| d.parse().ok()).map(|d: f64| {
-        match attrs.get("durationUnit").map(|u| u.as_str()) {
-            Some("sec") | Some("s") => d / 60.0,
-            Some("hr") | Some("hour") => d * 60.0,
-            _ => d, // min
-        }
+    let duration_min = f(attrs, "duration").map(|d| match attrs.get("durationUnit").map(|u| u.as_str()) {
+        Some("sec") | Some("s") => d / 60.0,
+        Some("hr") | Some("hour") => d * 60.0,
+        _ => d, // min
     });
-    let distance_m = attrs.get("totalDistance").and_then(|d| d.parse().ok()).map(|d: f64| {
-        to_meters(d, attrs.get("totalDistanceUnit").map(|s| s.as_str()).unwrap_or("m"))
+    let distance_m = f(attrs, "totalDistance")
+        .map(|d| to_meters(d, attrs.get("totalDistanceUnit").map(|s| s.as_str()).unwrap_or("m")))
+        .or_else(|| {
+            let s = kids.statistics.iter().find(|s| {
+                s.get("type")
+                    .is_some_and(|t| t.starts_with("HKQuantityTypeIdentifierDistance"))
+            })?;
+            Some(to_meters(f(s, "sum")?, s.get("unit").map(|u| u.as_str()).unwrap_or("m")))
+        });
+    let total_kcal = kcal(f(attrs, "totalEnergyBurned"), attrs.get("totalEnergyBurnedUnit"));
+    let active_kcal = kids
+        .stat("ActiveEnergyBurned")
+        .and_then(|s| kcal(f(s, "sum"), s.get("unit")));
+    let hr = kids.stat("HeartRate");
+    let avg_hr = hr.and_then(|s| f(s, "average"));
+    let max_hr = hr.and_then(|s| f(s, "maximum"));
+    let elevation_m = kids
+        .metadata
+        .iter()
+        .find(|(k, _)| k == "HKElevationAscended")
+        .and_then(|(_, v)| meta_qty(v))
+        .map(|(v, u)| to_meters(v, if u.is_empty() { "m" } else { &u }));
+    let external_id = kids
+        .metadata
+        .iter()
+        .find(|(k, _)| k == "HKExternalUUID")
+        .map(|(_, v)| v.clone());
+    let detail_json = (!kids.is_empty()).then(|| {
+        let mut o = serde_json::Map::new();
+        if !kids.statistics.is_empty() {
+            o.insert("statistics".into(), json!(kids.statistics));
+        }
+        if !kids.events.is_empty() {
+            o.insert("events".into(), json!(kids.events));
+        }
+        if !kids.metadata.is_empty() {
+            let m: serde_json::Map<String, Value> = kids
+                .metadata
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                .collect();
+            o.insert("metadata".into(), Value::Object(m));
+        }
+        if !kids.route_files.is_empty() {
+            o.insert("route_files".into(), json!(kids.route_files));
+        }
+        Value::Object(o).to_string()
     });
-    let total_kcal = attrs
-        .get("totalEnergyBurned")
-        .and_then(|d| d.parse().ok());
-    let mut avg_hr = None;
-    let mut max_hr = None;
-    let mut active_kcal = None;
-    for (ty, (sum, avg, max)) in stats {
-        if ty.contains("HeartRate") {
-            avg_hr = avg_hr.or(*avg);
-            max_hr = max_hr.or(*max);
-        }
-        if ty.contains("ActiveEnergyBurned") {
-            active_kcal = active_kcal.or(*sum);
-        }
-    }
     Some(Workout {
         id: None,
         activity_type: activity,
@@ -335,14 +424,14 @@ pub fn from_export_attrs(
         active_kcal,
         total_kcal,
         distance_m,
-        elevation_m: None,
+        elevation_m,
         zone1_min: None,
         zone2_min: None,
         zone3_min: None,
         zone4_min: None,
         zone5_min: None,
-        detail_json: None,
-        external_id: None,
+        detail_json,
+        external_id,
     })
 }
 
