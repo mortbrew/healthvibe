@@ -259,7 +259,7 @@ pub async fn heart(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
 
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct Night {
-    /// The date the user woke up.
+    /// The local date the user woke up (end of the session).
     pub date: String,
     pub awake_min: f64,
     pub rem_min: f64,
@@ -273,6 +273,21 @@ pub struct Night {
     /// InBed and Awake are excluded.
     pub asleep_min: f64,
     pub source: String,
+    /// True when this session is a nap, not the main overnight sleep.
+    ///
+    /// Nap rule (documented): after clustering contiguous asleep intervals
+    /// that are separated by gaps under 90 minutes into sessions (wake date =
+    /// local end date), a session is a nap when it is under 3 hours **or**
+    /// it starts between 10:00 and 18:00 local time and is not the longest
+    /// session that ends on that wake date.
+    #[serde(default)]
+    pub is_nap: bool,
+    /// Local start of the session (`YYYY-MM-DD HH:MM:SS`), when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    /// Local end of the session, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
 }
 
 fn is_asleep(stage: &str) -> bool {
@@ -368,10 +383,12 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
             }
         }
     }
-    // Merged asleep time for the preferred channel+source only.
-    let ivs: Vec<(String, String, String, String, f64, f64)> = sqlx::query_as(
+    // Asleep intervals (preferred channel only) with local bounds for clustering.
+    // night, channel, source, value, local_start, local_end, start_jd, end_jd
+    type SleepIv = (String, String, String, String, String, String, f64, f64);
+    let ivs: Vec<SleepIv> = sqlx::query_as(
         "SELECT substr(local_end, 1, 10), channel, COALESCE(source, ''), value,
-                julianday(start_utc), julianday(end_utc)
+                local_start, local_end, julianday(start_utc), julianday(end_utc)
          FROM readings
          WHERE user_id = ? AND type = ? AND local_end >= ? AND local_end < ?",
     )
@@ -381,32 +398,124 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
     .bind(shift(end, 2))
     .fetch_all(db)
     .await?;
-    // Union asleep intervals across every device source inside the preferred
-    // channel only (never across export_xml + HAE for the same night).
     let preferred_channel: BTreeMap<String, String> = best_key
         .iter()
         .map(|(d, (_, _, ch))| (d.clone(), ch.clone()))
         .collect();
+
+    // Collect asleep intervals per wake-date for the preferred channel.
+    let mut raw: BTreeMap<String, Vec<(String, String, f64, f64)>> = BTreeMap::new();
     let mut per: BTreeMap<String, Vec<(f64, f64)>> = BTreeMap::new();
-    for (night, channel, _source, value, s, e) in ivs {
+    for (night, channel, _source, value, ls, le, s, e) in ivs {
         if preferred_channel.get(&night).map(|c| c == &channel) != Some(true) {
             continue;
         }
         if is_asleep(stage(&value)) && e > s {
-            per.entry(night).or_default().push((s, e));
+            per.entry(night.clone()).or_default().push((s, e));
+            raw.entry(night).or_default().push((ls, le, s, e));
         }
     }
-    let nights: Vec<Night> = best
+
+    // Cluster into sessions (gap < 90 min), then flag naps.
+    let mut sessions: Vec<(String, String, String, f64, bool)> = vec![]; // night, start, end, min, is_nap
+    for (night, mut iv) in raw {
+        iv.sort_by(|a, b| a.2.total_cmp(&b.2));
+        // local_start, local_end, start_jd, end_jd, parts
+        type Cluster = (String, String, f64, f64, Vec<(f64, f64)>);
+        let mut clusters: Vec<Cluster> = vec![];
+        for (ls, le, s, e) in iv {
+            if let Some(c) = clusters.last_mut() {
+                if (s - c.3) * 1440.0 < 90.0 {
+                    c.3 = c.3.max(e);
+                    if le > c.1 {
+                        c.1 = le;
+                    }
+                    c.4.push((s, e));
+                    continue;
+                }
+            }
+            clusters.push((ls, le, s, e, vec![(s, e)]));
+        }
+        let mut scored: Vec<(String, String, f64)> = clusters
+            .into_iter()
+            .map(|(ls, le, _, _, parts)| {
+                let mins = (union_minutes(parts) * 10.0).round() / 10.0;
+                (ls, le, mins)
+            })
+            .collect();
+        let longest = scored
+            .iter()
+            .map(|(_, _, m)| *m)
+            .fold(0.0_f64, f64::max);
+        for (ls, le, mins) in scored.drain(..) {
+            let hour: u32 = ls.get(11..13).and_then(|h| h.parse().ok()).unwrap_or(0);
+            let daytime = (10..18).contains(&hour);
+            let short = mins < 180.0;
+            let is_longest = (mins - longest).abs() <= 0.05;
+            // Nap rule: under 3h, or daytime start and not the day's longest.
+            // The longest non-daytime session is always the main overnight.
+            let is_nap = match (is_longest, daytime, short) {
+                (true, true, true) => true,   // only a short daytime sleep
+                (true, _, _) => false,        // main overnight (or long day sleep)
+                (false, _, true) => true,     // short secondary session
+                (false, true, _) => true,     // daytime secondary
+                (false, false, false) => false,
+            };
+            sessions.push((night.clone(), ls, le, mins, is_nap));
+        }
+    }
+
+    // Primary night totals (non-nap) keep stage breakdown from `best`.
+    let mut nights: Vec<Night> = best
         .into_values()
-        .map(|mut n| {
-            n.asleep_min = per
+        .filter_map(|mut n| {
+            let total = per
                 .remove(&n.date)
                 .map_or(0.0, |v| (union_minutes(v) * 10.0).round() / 10.0);
-            n
+            let main = sessions
+                .iter()
+                .filter(|(d, _, _, _, nap)| d == &n.date && !*nap)
+                .map(|(_, ls, le, m, _)| (ls.clone(), le.clone(), *m))
+                .max_by(|a, b| a.2.total_cmp(&b.2));
+            let Some((ls, le, mins)) = main else {
+                // Only naps that day — still surface the night as naps below.
+                return None;
+            };
+            n.asleep_min = mins;
+            n.is_nap = false;
+            n.start = Some(ls);
+            n.end = Some(le);
+            // Prefer total union when stages cover the main window.
+            if total > 0.0 && (total - mins).abs() < 1.0 {
+                n.asleep_min = total;
+            }
+            Some(n)
         })
-        .filter(|n| n.asleep_min > 0.0)
         .collect();
-    let last_night = match nights.last() {
+
+    for (date, ls, le, mins, is_nap) in &sessions {
+        if !*is_nap {
+            continue;
+        }
+        let source = nights
+            .iter()
+            .find(|n| n.date == *date)
+            .map(|n| n.source.clone())
+            .unwrap_or_default();
+        nights.push(Night {
+            date: date.clone(),
+            asleep_min: *mins,
+            source,
+            is_nap: true,
+            start: Some(ls.clone()),
+            end: Some(le.clone()),
+            ..Default::default()
+        });
+    }
+    nights.sort_by(|a, b| a.date.cmp(&b.date).then(a.is_nap.cmp(&b.is_nap)));
+
+    let last_main = nights.iter().rev().find(|n| !n.is_nap);
+    let last_night = match last_main {
         Some(n) => sqlx::query_as::<_, (String, String, String)>(
             "SELECT value, local_start, local_end FROM readings
              WHERE user_id = ? AND type = ? AND substr(local_end, 1, 10) = ?
@@ -726,7 +835,67 @@ mod tests {
         assert_eq!(s.nights.len(), 1);
     }
 
+    
     #[tokio::test]
+    async fn flags_daytime_nap_separate_from_overnight() {
+        let db = crate::db::open_memory().await.unwrap();
+        async fn put(
+            db: &sqlx::SqlitePool,
+            value: &str,
+            local_start: &str,
+            local_end: &str,
+            start_utc: &str,
+            end_utc: &str,
+        ) {
+            sqlx::query(
+                "INSERT INTO readings
+                 (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, channel, hash,
+                  local_start, local_end)
+                 VALUES (1, ?, ?, 'u', ?, ?, '-0500', 'Watch', 'export_xml', ?, ?, ?)",
+            )
+            .bind(SLEEP)
+            .bind(value)
+            .bind(start_utc)
+            .bind(end_utc)
+            .bind(format!("{value}-{start_utc}"))
+            .bind(local_start)
+            .bind(local_end)
+            .execute(db)
+            .await
+            .unwrap();
+        }
+        // Overnight Core 22:30–06:30 local ending 2024-01-02.
+        put(
+            &db,
+            "HKCategoryValueSleepAnalysisAsleepCore",
+            "2024-01-01 22:30:00",
+            "2024-01-02 06:30:00",
+            "2024-01-02T03:30:00Z",
+            "2024-01-02T11:30:00Z",
+        )
+        .await;
+        // Daytime nap 13:00–14:00.
+        put(
+            &db,
+            "HKCategoryValueSleepAnalysisAsleepUnspecified",
+            "2024-01-02 13:00:00",
+            "2024-01-02 14:00:00",
+            "2024-01-02T18:00:00Z",
+            "2024-01-02T19:00:00Z",
+        )
+        .await;
+        let s = sleep(&db, 1, "2024-01-03", 14).await.unwrap();
+        let main: Vec<_> = s.nights.iter().filter(|n| !n.is_nap).collect();
+        let naps: Vec<_> = s.nights.iter().filter(|n| n.is_nap).collect();
+        assert_eq!(main.len(), 1, "{:?}", s.nights);
+        assert_eq!(main[0].date, "2024-01-02");
+        assert!(main[0].asleep_min > 400.0, "{}", main[0].asleep_min);
+        assert_eq!(naps.len(), 1, "{:?}", s.nights);
+        assert_eq!(naps[0].date, "2024-01-02");
+        assert!((naps[0].asleep_min - 60.0).abs() < 0.2, "{}", naps[0].asleep_min);
+    }
+
+#[tokio::test]
     async fn sleep_and_body() {
         let db = seeded().await;
         let s = sleep(&db, 1, "2024-01-02", 7).await.unwrap();
