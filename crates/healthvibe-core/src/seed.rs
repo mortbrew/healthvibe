@@ -329,7 +329,7 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
                 id: None,
             };
             crate::workouts::upsert(db, opts.user_id, &w).await?;
-            // Duration reading for awards/browse.
+            // Duration reading for browse.
             put_reading(
                 db,
                 opts.user_id,

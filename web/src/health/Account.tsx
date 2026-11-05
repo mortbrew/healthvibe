@@ -41,7 +41,6 @@ export function AccountMenu() {
       <Group>
         <Row to="/account/sync" label="iPhone Sync (Health Auto Export)" tone="green" />
         <Row to="/settings/import" label="Import Health Data" tone="green" />
-        <Row to="/awards" label="Awards" tone="green" />
       </Group>
       {user.is_admin && <Group><Row to="/settings/users" label="Users" /></Group>}
       <Group>
@@ -153,7 +152,7 @@ export function PrivacyPage() {
       <Group title="Sessions"><Row onClick={revoke} label="Sign Out Other Devices" tone="blue" /></Group>
       <section className="card danger">
         <h3>Delete My Data</h3>
-        <p className="muted small">Deletes all readings, workouts, goals, pins and marked awards for your account. Your login stays. Type <b>{user.username}</b> to confirm.</p>
+        <p className="muted small">Deletes all readings, workouts, goals and pins for your account. Your login stays. Type <b>{user.username}</b> to confirm.</p>
         <input value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Confirm username" />
         <button className="pill red" disabled={confirm !== user.username} onClick={del}>Delete Everything</button>
       </section>

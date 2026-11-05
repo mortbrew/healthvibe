@@ -179,10 +179,6 @@ async fn browse_records_paginate_and_are_per_user() {
     )
     .await;
     assert_eq!(v["values"][8], 0.0);
-    // No awards are computed from the step data.
-    let (s, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    assert_eq!(s, 200);
-    assert!(v.get("awards").is_none());
 
     reading(
         &db,

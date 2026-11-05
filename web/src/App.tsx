@@ -6,7 +6,6 @@ import { ChangePassword, Login, Setup } from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Summary, { ActivityDay, DistanceDetail, StepsDetail, WorkoutDetail } from "./health/Summary";
 import Browse, { AllRecords, BrowseCategory, MetricDetail } from "./health/Browse";
-import Awards from "./health/Awards";
 import Trends, { TrendDetail } from "./health/Trends";
 import { AccountMenu, AccountSheet, AppearancePage, DetailsPage, ImportPage, PasswordPage, PrivacyPage, ProfilePage, SyncPage, UnitsPage, UsersPage, useProfile } from "./health/Account";
 import { EMPTY_PROFILE, HealthCtx, unitsOf } from "./health/ctx";
@@ -93,14 +92,12 @@ export default function App() {
   else if (seg[0] === "browse" && seg[1] === "metric" && seg[2]) page = <MetricDetail metric={dec(seg[2])} />;
   else if (seg[0] === "browse" && seg[1]) page = <BrowseCategory k={seg[1]} />;
   else if (path === "/dashboards" || path === "/dashboard") page = <Dashboard />;
-  else if (path === "/awards") page = <Awards />;
   else if (path === "/account" || path === "/settings") { page = <Summary />; sheet = <AccountSheet />; }
   else if (path === "/account/profile") page = <ProfilePage />;
   else if (path === "/account/details") page = <DetailsPage />;
   else if (path === "/account/units") page = <UnitsPage />;
   else if (path === "/account/privacy") page = <PrivacyPage />;
   else if (path === "/account/sync") page = <SyncPage />;
-  else if (path === "/account/awards") page = <Awards />;
   else if (path === "/account/appearance") page = <AppearancePage />;
   else if (path === "/account/password") page = <PasswordPage />;
   else if (path === "/settings/import" || path === "/import") page = <ImportPage />;

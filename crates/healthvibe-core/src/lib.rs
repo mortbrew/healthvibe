@@ -2,7 +2,6 @@
 //! the server and the CLI.
 
 pub mod auth;
-pub mod awards;
 pub mod browse;
 pub mod channel;
 pub mod workouts;

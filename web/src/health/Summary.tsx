@@ -7,14 +7,12 @@ import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, EN
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
 import { FitRings, ofGoal, ringsOf } from "./rings";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
-import type { AwardsResp } from "./Awards";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
 export type RingDay = { date: string; move_kcal: number; move_goal: number | null; exercise_min: number; exercise_goal: number | null; stand_hours: number; stand_goal: number | null; workout: boolean };
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
-const longDay = (d: string) => new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 const hourly = (m: string, d?: string | null) => `/hourly?metric=${encodeURIComponent(m)}${d ? `&date=${d}` : ""}`;
 const prettyWorkout = (m: string) => m.replace(/^HKWorkoutActivityType/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 
@@ -51,15 +49,12 @@ export default function Summary() {
   const browse = useBrowse();
   const steps = useApi<{ date: string | null; values: number[] }>(hourly(STEPS));
   const dist = useApi<{ date: string | null; values: number[]; unit: string | null }>(hourly(DISTANCE));
-  const awards = useApi<AwardsResp>("/awards");
   const wlist = useApi<{ workouts: import("../api").Workout[] }>("/workouts?limit=5");
   const r = act.data?.rings;
   const metrics = browse.data?.metrics ?? [];
   const workouts = metrics.filter((m) => m.metric.startsWith("HKWorkoutActivityType"));
   const lastW = [...workouts].sort((a, b) => (b.latest_at ?? "").localeCompare(a.latest_at ?? ""))[0];
   const totalW = workouts.reduce((a, m) => a + m.count, 0);
-  const marked = (awards.data?.apple_only ?? []).filter((a) => a.earned);
-  const latestAward = [...marked].sort((a, b) => (b.earned_date ?? "").localeCompare(a.earned_date ?? ""))[0];
   const sum = (v?: number[]) => (v ?? []).reduce((a, b) => a + b, 0);
   const [dv, du] = conv(sum(dist.data?.values), dist.data?.unit ?? "mi", units);
 
@@ -111,15 +106,6 @@ export default function Summary() {
               <p className="muted small">{totalW.toLocaleString()} sessions recorded</p>
             </>
           ) : <p className="muted">No workouts yet.</p>}
-        </Tile>
-        <Tile title="Awards" to="/awards">
-          {latestAward ? (
-            <div className="award-tile">
-              <b>{latestAward.name}</b>
-              {latestAward.earned_date && <span className="muted small">{longDay(latestAward.earned_date)}</span>}
-              <span className="muted small">{marked.length} marked as earned</span>
-            </div>
-          ) : <p className="muted small">Mark the Apple Fitness awards you've earned.</p>}
         </Tile>
       </div>
 

@@ -113,108 +113,30 @@ async fn reading(db: &sqlx::SqlitePool, uid: i64, kind: &str, v: &str, day: &str
 const ENERGY: &str = "HKQuantityTypeIdentifierActiveEnergyBurned";
 
 #[tokio::test]
-async fn no_awards_are_computed_from_data() {
+async fn awards_feature_is_gone() {
     let (app, db) = app().await;
     let (admin, _sam) = two_users(&app).await;
-    // A week of big Move days and a workout: nothing here becomes an award.
     for d in 5..=14 {
         reading(&db, 1, ENERGY, "2600", &format!("2026-01-{d:02}"), 0).await;
     }
-    reading(&db, 1, "HKWorkoutActivityTypeRunning", "30", "2026-01-06", 1).await;
-    let (s, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    assert_eq!(s, 200);
-    let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
-    assert_eq!(keys, vec!["apple_only"]);
-    assert!(v["apple_only"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|a| a["earned"] == false));
-    // The old opt-in switch and its flag are gone.
-    let (s, _, _) = call(
-        &app,
-        "PUT",
-        "/api/v1/me/awards",
-        Some(&admin),
-        Some(json!({"enabled": true})),
-    )
-    .await;
-    assert_ne!(s, StatusCode::OK);
+    for (m, u) in [
+        ("GET", "/api/v1/awards"),
+        ("PUT", "/api/v1/awards/apple/monthly_challenge"),
+        ("PUT", "/api/v1/me/awards"),
+    ] {
+        let (s, v, _) = call(&app, m, u, Some(&admin), Some(json!({"earned": true, "enabled": true}))).await;
+        assert_ne!(s, StatusCode::OK, "{m} {u}");
+        assert!(v.get("apple_only").is_none() && v.get("awards").is_none());
+    }
     let (s, v, _) = call(&app, "GET", "/api/v1/session", Some(&admin), None).await;
     assert_eq!((s, &v["user"]["username"]), (StatusCode::OK, &json!("toby")));
     assert!(v["user"].get("awards_enabled").is_none());
-    assert_eq!(
-        call(&app, "GET", "/api/v1/awards", None, None).await.0,
-        StatusCode::UNAUTHORIZED
-    );
-}
-
-#[tokio::test]
-async fn apple_only_manual_checks_are_per_user() {
-    let (app, _db) = app().await;
-    let (admin, sam) = two_users(&app).await;
-    let u = "/api/v1/awards/apple/monthly_challenge";
-    assert_eq!(
-        call(
-            &app,
-            "PUT",
-            u,
-            Some(&admin),
-            Some(json!({"earned": true, "date": "2026-03-31"}))
-        )
-        .await
-        .0,
-        200
-    );
-    assert_eq!(
-        call(
-            &app,
-            "PUT",
-            "/api/v1/awards/apple/nope",
-            Some(&admin),
-            Some(json!({"earned": true}))
-        )
-        .await
-        .0,
-        404
-    );
-    assert_eq!(
-        call(
-            &app,
-            "PUT",
-            u,
-            Some(&admin),
-            Some(json!({"earned": true, "date": "bad"}))
-        )
-        .await
-        .0,
-        400
-    );
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    let m = v["apple_only"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|a| a["key"] == "monthly_challenge")
-        .unwrap()
-        .clone();
-    assert_eq!(
-        (m["earned"].clone(), m["earned_date"].clone()),
-        (json!(true), json!("2026-03-31"))
-    );
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&sam), None).await;
-    assert!(v["apple_only"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|a| a["earned"] == false));
-    call(&app, "PUT", u, Some(&admin), Some(json!({"earned": false}))).await;
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    assert!(v["apple_only"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|a| a["earned"] == false));
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE name LIKE '%award%'")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+    assert!(tables.is_empty(), "{tables:?}");
 }
 
 #[tokio::test]
@@ -310,11 +232,6 @@ async fn privacy_export_delete_and_sessions() {
         .execute(&db)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO apple_awards (user_id, key, earned_date) VALUES (?, 'sharing', NULL)")
-            .bind(uid)
-            .execute(&db)
-            .await
-            .unwrap();
         sqlx::query("INSERT INTO ingest_raw (user_id, received_at, body, status) VALUES (?, '2026-01-01T00:00:00Z', x'00', 'failed')")
             .bind(uid)
             .execute(&db)
@@ -350,7 +267,7 @@ async fn privacy_export_delete_and_sessions() {
         .await
         .unwrap();
     assert_eq!(left, vec![2]);
-    for table in ["workouts", "ingest_raw", "apple_awards"] {
+    for table in ["workouts", "ingest_raw"] {
         let left: Vec<i64> = sqlx::query_scalar(&format!("SELECT user_id FROM {table}"))
             .fetch_all(&db)
             .await

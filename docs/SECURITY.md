@@ -160,7 +160,7 @@ features it has are outside healthvibe's control. Check its privacy policy.
 | Workouts and their raw details (statistics, events, metadata, route file names) | `workouts` | **Plain text** |
 | Activity ring goals | `activity_goals` | **Plain text** |
 | Profile: display name, birth date, sex, height, wheelchair use, avatar settings, units | `profiles` | **Plain text** |
-| Apple Fitness awards you marked as earned, pinned metrics, dashboards, theme | various | Plain text |
+| Pinned metrics, dashboards, theme | various | Plain text |
 | Failed Shortcut upload bodies, for up to 24 h | `ingest_raw` | **Plain text** |
 | Import history (counts per type, errors) | `import_jobs` | Plain text |
 | Usernames (which may be email addresses), admin flag | `users` | Plain text |
@@ -275,7 +275,7 @@ where provider keys are stored (planned: encrypted under the per-user key, see
   `Workout:<type>` row plus one `Workout:<type>:<field>` row per stored
   value). Once downloaded it is outside healthvibe's protection.
 - "Delete all my health data" removes your readings, workouts, ring goals,
-  pending raw uploads, sync cursors, marked Apple awards and pinned metrics.
+  pending raw uploads, sync cursors and pinned metrics.
   It keeps your account, profile, dashboards and paired device. Copies in
   backups, WAL or disk snapshots are not touched.
 - Every response carries security headers:
@@ -297,10 +297,10 @@ where provider keys are stored (planned: encrypted under the per-user key, see
 
 healthvibe shows only what was imported, plus daily totals and unit
 conversions. It does not work out heart-rate zones, workout heart-rate
-averages from samples, sleep sessions or naps, awards or streaks, or default
-or carried-forward ring goals. Sleep is shown as the raw stage samples, each
-counted on the local date its sample **ends**. A day without an imported
-ring goal shows no goal.
+averages from samples, sleep sessions or naps, streaks, or default or
+carried-forward ring goals, and there is no awards feature. Sleep is shown as
+the raw stage samples, each counted on the local date its sample **ends**. A
+day without an imported ring goal shows no goal.
 
 ## 9. Threat model
 

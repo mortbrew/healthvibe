@@ -18,7 +18,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use healthvibe_core::{auth, awards as aw, browse, dashboards, import, profile, stats};
+use healthvibe_core::{auth, browse, dashboards, import, profile, stats};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
@@ -50,8 +50,6 @@ pub fn routes() -> Router<AppState> {
         .route("/browse", get(browse_list))
         .route("/records", get(records))
         .route("/hourly", get(hourly))
-        .route("/awards", get(awards))
-        .route("/awards/apple/{key}", put(set_apple_award))
         .route("/profile", get(get_profile).put(put_profile))
         .route("/me/export.csv", get(export_csv))
         .route("/me/data", axum::routing::delete(delete_data))
@@ -749,56 +747,6 @@ async fn hourly(
     ))
 }
 
-async fn awards(State(st): State<AppState>, User(u): User) -> ApiResult {
-    let manual: Vec<(String, Option<String>)> =
-        sqlx::query_as("SELECT key, earned_date FROM apple_awards WHERE user_id = ?")
-            .bind(u.id)
-            .fetch_all(&st.db)
-            .await?;
-    let apple: Vec<Value> = aw::APPLE_ONLY
-        .iter()
-        .map(|(k, n, d)| {
-            let m = manual.iter().find(|m| m.0 == *k);
-            json!({ "key": k, "name": n, "description": d, "earned": m.is_some(), "earned_date": m.and_then(|m| m.1.clone()) })
-        })
-        .collect();
-    // Only awards the user marked as earned in Apple Fitness; nothing is
-    // computed from health data.
-    Ok(Json(json!({ "apple_only": apple })))
-}
-
-#[derive(Deserialize)]
-struct AppleAward {
-    earned: bool,
-    date: Option<String>,
-}
-
-async fn set_apple_award(
-    State(st): State<AppState>,
-    User(u): User,
-    Path(key): Path<String>,
-    Json(b): Json<AppleAward>,
-) -> ApiResult {
-    if !aw::APPLE_ONLY.iter().any(|a| a.0 == key) {
-        return Err(ApiError(StatusCode::NOT_FOUND, "not_found"));
-    }
-    let date = b.date.filter(|d| !d.is_empty());
-    if date.as_deref().is_some_and(|d| !chrono_ok(d)) {
-        return Err(bad("invalid_date"));
-    }
-    if b.earned {
-        sqlx::query("INSERT INTO apple_awards (user_id, key, earned_date) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET earned_date = excluded.earned_date")
-            .bind(u.id).bind(&key).bind(&date).execute(&st.db).await?;
-    } else {
-        sqlx::query("DELETE FROM apple_awards WHERE user_id = ? AND key = ?")
-            .bind(u.id)
-            .bind(&key)
-            .execute(&st.db)
-            .await?;
-    }
-    Ok(Json(json!({ "ok": true })))
-}
-
 async fn get_profile(State(st): State<AppState>, User(u): User) -> ApiResult {
     Ok(Json(
         json!({ "profile": profile::get(&st.db, u.id).await? }),
@@ -914,7 +862,7 @@ struct Confirm {
 }
 
 /// Delete all of this user's health data (readings, workouts, goals, raw uploads awaiting
-/// parse, sync cursors, marked Apple awards). Keeps the account, profile and devices.
+/// parse, sync cursors, pinned metrics). Keeps the account, profile and devices.
 async fn delete_data(
     State(st): State<AppState>,
     User(u): User,
@@ -930,7 +878,6 @@ async fn delete_data(
         "activity_goals",
         "ingest_raw",
         "sync_cursors",
-        "apple_awards",
         "pinned_metrics",
     ] {
         sqlx::query(&format!("DELETE FROM {t} WHERE user_id = ?"))
