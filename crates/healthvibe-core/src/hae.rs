@@ -5,15 +5,15 @@
 //!   HealthKit types export.xml uses, converted to healthvibe's units.
 //! - `heart_rate` `Avg` is stored as heart rate; `Min`/`Max` as
 //!   `healthvibe.HeartRateMin` / `healthvibe.HeartRateMax`.
-//! - `sleep_analysis` works unaggregated (one row per stage segment) and
-//!   aggregated (per night totals laid out as consecutive stage segments).
+//! - `sleep_analysis` must be unaggregated (one row per stage segment, stored
+//!   as sent). Aggregated nightly totals carry no per-stage times, so they are
+//!   rejected with an error instead of being laid out as invented segments.
 //! - Unknown metrics are still stored, as `healthvibe.hae.<name>`.
 //! - Every row is tagged `channel = health_auto_export`. Re-sent readings
 //!   upsert on `(type, channel, source, start, end)` so a day total that
 //!   grows during the day is updated, not doubled. Partial batches never
 //!   delete other metrics for that day.
 
-use crate::auth::sha256_hex;
 use crate::shortcut::{self as sc, Kind};
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use serde::Serialize;
@@ -221,51 +221,12 @@ fn sleep(
         out.push(reading(hk, Some(stage), None, s, e, src));
         return Ok(());
     }
-    // Aggregated: per-night totals in hours. Lay the stages out back to
-    // back from sleepStart so the totals match; the times are approximate.
-    let start = ts(o.get("sleepStart")).ok_or("aggregated sleep: missing sleepStart")?;
-    let end = ts(o.get("sleepEnd")).unwrap_or(start);
-    let night = txt(o.get("date")).unwrap_or_else(|| start.format("%Y-%m-%d").to_string());
-    let h = |k: &str| num(o.get(k)).unwrap_or(0.0).max(0.0);
-    let (core, deep, rem) = (h("core"), h("deep"), h("rem"));
-    let total = if h("totalSleep") > 0.0 {
-        h("totalSleep")
-    } else {
-        h("asleep")
-    };
-    let unspec = (total - core - deep - rem).max(0.0);
-    let awake = (((end - start).num_seconds() as f64) / 3600.0 - total).max(0.0);
-    let mut t = start;
-    let key = |stage: &str| {
-        format!(
-            "{hk}\x1faggregated\x1f{night}\x1f{stage}\x1f{}",
-            src.as_deref().unwrap_or("")
-        )
-    };
-    for (stage, hours) in [
-        ("Core", core),
-        ("Deep", deep),
-        ("REM", rem),
-        ("Asleep", unspec),
-        ("Awake", awake),
-    ] {
-        if hours < 1.0 / 120.0 {
-            continue;
-        }
-        let e = t + Duration::seconds((hours * 3600.0).round() as i64);
-        let mut r = reading(hk.clone(), sleep_stage(stage), None, t, e, src.clone());
-        r.key = key(stage);
-        out.push(r);
-        t = e;
-    }
-    if let (Some(s), Some(e)) = (ts(o.get("inBedStart")), ts(o.get("inBedEnd"))) {
-        if e > s && h("inBed") > 0.0 {
-            let mut r = reading(hk.clone(), sleep_stage("In Bed"), None, s, e, src.clone());
-            r.key = key("InBed");
-            out.push(r);
-        }
-    }
-    Ok(())
+    // Aggregated nightly totals have no per-stage start/end times. Storing
+    // them would mean inventing a timeline, so they are not imported.
+    let _ = src;
+    Err("aggregated sleep is not imported (no per-stage times); \
+         turn Aggregate Data off in Health Auto Export"
+        .into())
 }
 
 fn metric_points(m: &Value, out: &mut Vec<Reading>, errs: &mut Vec<String>) {
@@ -515,19 +476,13 @@ pub async fn ingest(
         let source = r.source.clone().unwrap_or_default();
         let start_u = utc(r.start);
         let end_u = utc(r.end);
-        // Aggregated sleep stages share one wall-clock span; keep their
-        // distinct keys so Core/Deep/REM don't collapse into one row.
-        let hash = if r.key.contains("\x1faggregated\x1f") {
-            sha256_hex(&format!("hae\x1f{}", r.key))
-        } else {
-            crate::channel::reading_hash(
-                crate::channel::HEALTH_AUTO_EXPORT,
-                &r.kind,
-                &source,
-                &start_u,
-                &end_u,
-            )
-        };
+        let hash = crate::channel::reading_hash(
+            crate::channel::HEALTH_AUTO_EXPORT,
+            &r.kind,
+            &source,
+            &start_u,
+            &end_u,
+        );
         let old: Option<(Option<String>, String, String)> = sqlx::query_as(
             "SELECT value, start_utc, end_utc FROM readings
              WHERE user_id = ? AND type = ? AND channel = ? AND source = ?
@@ -659,19 +614,11 @@ mod tests {
     }
 
     #[test]
-    fn aggregated_sleep_totals() {
+    fn aggregated_sleep_is_rejected_not_invented() {
         let body = br#"{"data":{"metrics":[{"name":"sleep_analysis","units":"hr","data":[{"date":"2026-10-06","totalSleep":7.5,"asleep":7.5,"core":4,"deep":1.5,"rem":2,"sleepStart":"2026-10-05 23:00:00 -0400","sleepEnd":"2026-10-06 07:00:00 -0400","inBed":8.25,"inBedStart":"2026-10-05 22:45:00 -0400","inBedEnd":"2026-10-06 07:00:00 -0400","source":"Synthetic Watch"}]}]}}"#;
-        let (rows, _) = parse(body).unwrap();
-        let mins = |v: &str| {
-            rows.iter()
-                .filter(|r| r.value.as_deref() == Some(v))
-                .map(|r| (r.end - r.start).num_minutes())
-                .sum::<i64>()
-        };
-        assert_eq!(mins("HKCategoryValueSleepAnalysisAsleepCore"), 240);
-        assert_eq!(mins("HKCategoryValueSleepAnalysisAsleepDeep"), 90);
-        assert_eq!(mins("HKCategoryValueSleepAnalysisAsleepREM"), 120);
-        assert_eq!(mins("HKCategoryValueSleepAnalysisAwake"), 30);
-        assert_eq!(mins("HKCategoryValueSleepAnalysisInBed"), 495);
+        let (rows, errs) = parse(body).unwrap();
+        assert!(rows.is_empty(), "no invented stage segments");
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].contains("Aggregate Data off"), "{errs:?}");
     }
 }

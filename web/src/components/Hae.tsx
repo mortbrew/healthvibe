@@ -300,7 +300,7 @@ export function HaeSteps({ connect, start = 1 }: { connect: React.ReactNode; sta
             in healthvibe. At minimum, make sure these are on:
             <MetricChecklist />
           </li>
-          <li><b>Aggregate Data</b>: off, so every reading and every sleep stage arrives. (On also works; sleep is then a nightly summary.)</li>
+          <li><b>Aggregate Data</b>: off, so every reading and every sleep stage arrives. Sleep needs it off: aggregated nightly sleep totals have no stage times and are not imported.</li>
           <li><b>Batch Requests</b>: on, so a long history is sent in pieces.</li>
           <li><b>Date Range</b>: since the last sync if offered, otherwise the last few days. Re-sent readings are recognised and never doubled.</li>
         </ul>
