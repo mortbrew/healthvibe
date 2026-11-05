@@ -218,7 +218,10 @@ input.copyval { font: inherit; font-family: ui-monospace, monospace; font-size: 
 .nb-title { text-align: center; display: flex; flex-direction: column; line-height: 1.2; }
 .nb-right { display: flex; gap: .5rem; justify-content: flex-end; min-width: 44px; }
 .roundbtn { width: 38px; height: 38px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
-  background: var(--surface-2); color: var(--text); }
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent); color: var(--text);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, #fff 18%, transparent); }
+.roundbtn:disabled { opacity: .4; cursor: default; }
 .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 1.6rem 0 .6rem; }
 .sec-head h2, section > h2 { font-size: 1.3rem; font-weight: 750; margin: 0; }
 section > h2 { margin: 1.6rem 0 .6rem; }
@@ -492,3 +495,28 @@ button.link:disabled { color: var(--muted); cursor: default; }
 .goalfrom { margin-top: .35rem; }
 .goals-hist { display: flex; align-items: center; gap: .75rem; width: 100%; }
 .goals-hist .row-label { display: block; }
+
+
+/* Fitness Summary action pills (Edit Summary / See All Categories) */
+.fit-actions { display: flex; flex-direction: column; gap: .65rem; margin: 1.25rem 0 2rem; align-items: stretch; }
+.fit-actions .fit-action { display: block; text-align: center; background: var(--card); color: var(--accent, #30d158); font-weight: 600; border-radius: 999px; padding: .85rem 1rem; border: 0; text-decoration: none; cursor: pointer; font: inherit; }
+.fit-actions .fit-action:hover { filter: brightness(1.08); }
+
+/* Health Summary Activity pin card */
+.activity-pin-body { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.act-mini-stats { display: flex; gap: 1rem; flex: 1; }
+.act-mini-stats > div { display: flex; flex-direction: column; gap: .15rem; }
+.act-mini-stats .as-label { font-size: .72rem; font-weight: 600; }
+.as-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .35rem; }
+.as-of { font-size: .9rem; }
+.pinmark { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--fill, #3a3a3c); color: #fff; font-weight: 700; flex: none; }
+.pinmark.on { background: #ff453a; }
+.stage-totals { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem 1rem; margin-top: .75rem; }
+.stage-totals div { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
+.stage-totals i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.stage-totals b { margin-left: auto; }
+
+/* Sheet: lock background scroll while open */
+body:has(.sheet-backdrop), body:has(.fullsheet) { overflow: hidden; touch-action: none; }
+.sheet-backdrop { overscroll-behavior: contain; }
+.sheet { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }

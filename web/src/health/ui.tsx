@@ -1,6 +1,6 @@
 // Shared iOS-style chrome: large titles, round buttons, sheets, grouped rows.
 import { Link, navigate, usePath } from "../router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AvatarSvg } from "./avatar";
 import { useHealth } from "./ctx";
 import { Chevron } from "./meta";
@@ -51,9 +51,36 @@ export function NavBar({ to, title, sub, right }: { to: string; title?: string; 
 }
 
 export function Sheet({ title, onClose, children, left }: { title: string; onClose: () => void; children: React.ReactNode; left?: "x" | "back" }) {
+  const startY = useRef<number | null>(null);
+  const [dy, setDy] = useState(0);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const body = (e.currentTarget as HTMLElement).querySelector(".sheet-body") as HTMLElement | null;
+    if (body && body.scrollTop > 0) { startY.current = null; return; }
+    startY.current = e.touches[0].clientY;
+    setDy(0);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (startY.current == null) return;
+    const d = Math.max(0, e.touches[0].clientY - startY.current);
+    setDy(d);
+  };
+  const onTouchEnd = () => {
+    if (dy > 110) onClose();
+    startY.current = null;
+    setDy(0);
+  };
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="sheet"
+        role="dialog"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={dy ? { transform: `translateY(${dy}px)`, transition: "none" } : undefined}
+      >
         <div className="sheet-head">
           <RoundBtn label={left === "back" ? "Back" : "Close"} onClick={onClose}>{left === "back" ? <BackIcon /> : <XIcon />}</RoundBtn>
           <b>{title}</b>

@@ -6,6 +6,7 @@ import { ChangePassword, Login, Setup } from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Summary, { ActivityDay, DistanceDetail, StepsDetail, WorkoutDetail } from "./health/Summary";
 import Browse, { AllRecords, BrowseCategory, MetricDetail } from "./health/Browse";
+import Fitness, { FitnessSessions } from "./health/Fitness";
 import Trends, { TrendDetail } from "./health/Trends";
 import { AccountMenu, AccountSheet, AppearancePage, DetailsPage, ImportPage, PasswordPage, PrivacyPage,
   GoalsPage, ProfilePage, SyncPage, UnitsPage, UsersPage, useProfile } from "./health/Account";
@@ -85,13 +86,15 @@ export default function App() {
   else if (path === "/summary/steps") page = <StepsDetail />;
   else if (path === "/summary/distance") page = <DistanceDetail />;
   else if (seg[0] === "workouts" && seg[1]) page = <WorkoutDetail id={seg[1]} />;
-  else if (path === "/summary/trends") page = <Trends />;
-  else if (seg[0] === "summary" && seg[1] === "trends" && seg[2]) page = <TrendDetail k={seg[2]} />;
+  else if (path === "/summary/trends" || path === "/dashboards/trends") page = <Trends />;
+  else if ((seg[0] === "summary" || seg[0] === "dashboards") && seg[1] === "trends" && seg[2]) page = <TrendDetail k={seg[2]} />;
   else if (seg[0] === "activity" && /^\d{4}-\d{2}-\d{2}$/.test(seg[1] ?? "")) page = <ActivityDay date={seg[1]} />;
-  else if (path === "/browse") page = <Browse />;
-  else if (seg[0] === "browse" && seg[1] === "metric" && seg[2] && seg[3] === "all") page = <AllRecords metric={dec(seg[2])} />;
-  else if (seg[0] === "browse" && seg[1] === "metric" && seg[2]) page = <MetricDetail metric={dec(seg[2])} />;
-  else if (seg[0] === "browse" && seg[1]) page = <BrowseCategory k={seg[1]} />;
+  else if (path === "/fitness") page = <Fitness />;
+  else if (path === "/fitness/sessions") page = <FitnessSessions />;
+  else if (path === "/health" || path === "/browse") page = <Browse />;
+  else if ((seg[0] === "health" || seg[0] === "browse") && seg[1] === "metric" && seg[2] && seg[3] === "all") page = <AllRecords metric={dec(seg[2])} />;
+  else if ((seg[0] === "health" || seg[0] === "browse") && seg[1] === "metric" && seg[2]) page = <MetricDetail metric={dec(seg[2])} />;
+  else if ((seg[0] === "health" || seg[0] === "browse") && seg[1]) page = <BrowseCategory k={seg[1]} />;
   else if (path === "/dashboards" || path === "/dashboard") page = <Dashboard />;
   else if (path === "/account" || path === "/settings") { page = <Summary />; sheet = <AccountSheet />; }
   else if (path === "/account/profile") page = <ProfilePage />;
@@ -124,12 +127,17 @@ export default function App() {
   }
 
   const tabs: [string, string, React.ReactNode][] = [
-    ["/", "Summary", <TabIcon key="s" d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z" />],
-    ["/browse", "Browse", <TabIcon key="b" d="M4 5h16v3H4zM4 10.5h16v3H4zM4 16h16v3H4z" />],
+    ["/", "Summary", <TabIcon key="s" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />],
+    ["/fitness", "Fitness", <TabIcon key="f" d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 3a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />],
+    ["/health", "Health", <TabIcon key="h" d="M4 5h7v7H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 14h7v5H4z" />],
     ["/dashboards", "Dashboards", <TabIcon key="d" d="M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z" />],
   ];
   const active = (to: string) =>
-    to === "/" ? !acctPath && !["/browse", "/dashboards", "/dashboard", "/help"].some((p) => path.startsWith(p)) : path.startsWith(to);
+    to === "/"
+      ? !acctPath && !["/fitness", "/health", "/browse", "/dashboards", "/dashboard", "/help"].some((p) => path.startsWith(p))
+      : to === "/health"
+        ? path.startsWith("/health") || path.startsWith("/browse")
+        : path.startsWith(to);
 
   return (
     <HealthCtx.Provider value={ctx}>

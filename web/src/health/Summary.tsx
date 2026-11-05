@@ -5,7 +5,7 @@ import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
 import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, ENERGY, fmtNum, Spark, STEPS, unitLabel, useApi, useBrowse, when } from "./meta";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
-import { FitRings, GoalFrom, noGoals, ofGoal, ringsOf } from "./rings";
+import { FitRings, GoalFrom, noGoals, ringsOf } from "./rings";
 import { NoGoalsAlert } from "./Goals";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
 
@@ -17,107 +17,23 @@ const n0 = (v: number) => Math.round(v).toLocaleString();
 const hourly = (m: string, d?: string | null) => `/hourly?metric=${encodeURIComponent(m)}${d ? `&date=${d}` : ""}`;
 const prettyWorkout = (m: string) => m.replace(/^HKWorkoutActivityType/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 
-/** 24 hourly bars with 00/06/12/18 axis, used on small cards. */
-function MiniHours({ values, color, height = 70 }: { values: number[]; color: string; height?: number }) {
-  const W = 160, H = height, max = Math.max(...values, 1e-9);
-  const bw = W / 24;
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 14}`} className="minihours" aria-hidden>
-      <line x1="0" x2={W} y1={H} y2={H} className="gline" />
-      {[0, 6, 12, 18].map((h) => (
-        <g key={h}>
-          <line x1={h * bw} x2={h * bw} y1="0" y2={H} className="gline dash" />
-          <text x={h * bw + 2} y={H + 12} className="axis">{String(h).padStart(2, "0")}</text>
-        </g>
-      ))}
-      {values.map((v, i) => v > 0 && <rect key={i} x={i * bw + bw * 0.2} width={bw * 0.6} y={H - (v / max) * (H - 4)} height={(v / max) * (H - 4)} rx="1.5" fill={color} />)}
-    </svg>
-  );
-}
-
-function Tile({ title, to, children }: { title: string; to: string; children: React.ReactNode }) {
-  return (
-    <Link to={to} className="tile">
-      <div className="tile-head"><b>{title}</b><ChevronCircle /></div>
-      {children}
-    </Link>
-  );
-}
 
 export default function Summary() {
-  const { units } = useHealth();
   const act = useApi<Activity>("/dashboard/activity");
   const browse = useBrowse();
-  const steps = useApi<{ date: string | null; values: number[] }>(hourly(STEPS));
-  const dist = useApi<{ date: string | null; values: number[]; unit: string | null }>(hourly(DISTANCE));
-  const wlist = useApi<{ workouts: import("../api").Workout[] }>("/workouts?limit=5");
   const r = act.data?.rings;
   const metrics = browse.data?.metrics ?? [];
-  const workouts = metrics.filter((m) => m.metric.startsWith("HKWorkoutActivityType"));
-  const lastW = [...workouts].sort((a, b) => (b.latest_at ?? "").localeCompare(a.latest_at ?? ""))[0];
-  const totalW = workouts.reduce((a, m) => a + m.count, 0);
-  const sum = (v?: number[]) => (v ?? []).reduce((a, b) => a + b, 0);
-  const [dv, du] = conv(sum(dist.data?.values), dist.data?.unit ?? "mi", units);
-
-  // Empty account (no rings) or today's rings lack goals — prompt once per session.
+  const [editPins, setEditPins] = useState(false);
   const showAlert = noGoals(r) && (r == null || r.date === today());
   return (
     <div className="page summary">
-      <LargeTitle title="Summary" eyebrow={new Date().toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }).toUpperCase()} />
+      <LargeTitle title="Summary" />
       <NoGoalsAlert show={showAlert} />
-      <Link to={`/activity/${r?.date ?? today()}`} className="card ringcard">
-        <div className="tile-head"><b>Activity Rings</b><ChevronCircle /></div>
-        <div className="ringrow">
-          <FitRings v={r ? ringsOf(r) : null} size={150} />
-          <dl className="ringstats">
-            <div><dt>Move</dt><dd style={{ color: "var(--move)" }}><span className="num">{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}</span><small>CAL</small></dd></div>
-            <div><dt>Exercise</dt><dd style={{ color: "var(--exercise)" }}><span className="num">{r ? `${n0(r.exercise_min)}${ofGoal(r.exercise_goal)}` : "--"}</span><small>MIN</small></dd></div>
-            <div><dt>Stand</dt><dd style={{ color: "var(--stand)" }}><span className="num">{r ? `${n0(r.stand_hours)}${ofGoal(r.stand_goal)}` : "--"}</span><small>HRS</small></dd></div>
-          </dl>
-        </div>
-        {r && <GoalFrom r={r} />}
-        {noGoals(r) && <p className="muted small">No ring goals for this day. <span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Set goals</span></p>}
-        {r && !noGoals(r) && <p className="muted small"><span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Edit goals</span></p>}
-        {r && r.date !== today() && <p className="muted small">Latest data: {dayTitle(r.date)}</p>}
-      </Link>
-
-      <div className="tiles">
-        <Tile title="Steps" to="/summary/steps">
-          <p className="tile-sub">{steps.data?.date ? dayTitle(steps.data.date) : "No data"}</p>
-          <p className="big num" style={{ color: "var(--steps)" }}>{steps.data ? n0(sum(steps.data.values)) : "--"}</p>
-          <MiniHours values={steps.data?.values ?? Array(24).fill(0)} color="var(--steps)" />
-        </Tile>
-        <Tile title="Step Distance" to="/summary/distance">
-          <p className="tile-sub">{dist.data?.date ? dayTitle(dist.data.date) : "No data"}</p>
-          <p className="big num" style={{ color: "var(--distance)" }}>{dist.data ? dv.toFixed(2) : "--"}<small>{du}</small></p>
-          <MiniHours values={dist.data?.values ?? Array(24).fill(0)} color="var(--distance)" />
-        </Tile>
-        <Tile title="Sessions" to={wlist.data?.workouts?.[0] ? `/workouts/${wlist.data.workouts[0].id}` : (lastW ? `/browse/metric/${lastW.metric}` : "/browse/activity")}>
-          {wlist.data?.workouts?.[0] ? (
-            <>
-              <div className="session"><span className="wicon"><WorkoutIcon /></span><span>{prettyWorkout(wlist.data.workouts[0].activity_type)}</span></div>
-              <p className="big num" style={{ color: "var(--exercise)" }}>{Math.round(wlist.data.workouts[0].duration_min ?? 0)}<small>MIN</small></p>
-              <p className="tile-sub">{[
-                wlist.data.workouts[0].avg_hr != null ? `${Math.round(wlist.data.workouts[0].avg_hr)} bpm avg` : null,
-                wlist.data.workouts[0].active_kcal != null ? `${Math.round(wlist.data.workouts[0].active_kcal)} kcal` : null,
-                wlist.data.workouts[0].distance_m != null ? `${(wlist.data.workouts[0].distance_m / 1000).toFixed(2)} km` : null,
-              ].filter(Boolean).join(" · ") || when(wlist.data.workouts[0].local_start ?? wlist.data.workouts[0].start_utc)}</p>
-              <p className="muted small">{(wlist.data.workouts.length >= 5 ? `${totalW.toLocaleString()}+` : totalW.toLocaleString())} sessions recorded</p>
-            </>
-          ) : lastW ? (
-            <>
-              <div className="session"><span className="wicon"><WorkoutIcon /></span><span>{prettyWorkout(lastW.metric)}</span></div>
-              <p className="big num" style={{ color: "var(--exercise)" }}>{Math.round(Number(lastW.latest_value ?? 0))}<small>MIN</small></p>
-              <p className="tile-sub">{when(lastW.latest_at)}</p>
-              <p className="muted small">{totalW.toLocaleString()} sessions recorded</p>
-            </>
-          ) : <p className="muted">No workouts yet.</p>}
-        </Tile>
+      <Pinned metrics={metrics} activity={r} edit={editPins} setEdit={setEditPins} />
+      <div className="fit-actions">
+        <button type="button" className="pill fit-action" onClick={() => setEditPins(true)}>Edit Summary</button>
+        <Link to="/fitness" className="pill fit-action">See All Categories</Link>
       </div>
-
-      <Pinned metrics={metrics} />
-      <Link to="/browse" className="card linkrow">Show All Health Data <ChevronCircle /></Link>
-      <Highlights />
     </div>
   );
 }
@@ -128,9 +44,8 @@ export function WorkoutIcon() {
 
 /* ---------- Pinned ---------- */
 
-function Pinned({ metrics }: { metrics: BrowseMetric[] }) {
+function Pinned({ metrics, activity, edit, setEdit }: { metrics: BrowseMetric[]; activity: Activity["rings"] | null | undefined; edit: boolean; setEdit: (v: boolean) => void }) {
   const [pins, setPins] = useState<string[] | null>(null);
-  const [edit, setEdit] = useState(false);
   useEffect(() => {
     api<{ pinned: string[] }>("/pinned").then((r) => setPins(r.pinned), () => setPins([]));
   }, []);
@@ -144,15 +59,16 @@ function Pinned({ metrics }: { metrics: BrowseMetric[] }) {
     <section className="pinned">
       <div className="sec-head"><h2>Pinned</h2><button className="link" onClick={() => setEdit(true)}>Edit</button></div>
       <div className="pingrid">
+        <ActivityPinCard r={activity ?? null} />
         {list.map((m) => {
           const bm = metrics.find((x) => x.metric === m);
           return bm ? <PinCard key={m} m={bm} /> : null;
         })}
       </div>
-      {pins !== null && !list.length && <p className="muted">Pin metrics from Browse to see them here.</p>}
+      {pins !== null && !list.length && !activity && <p className="muted">Pin metrics from Health to see them here.</p>}
       {edit && (
         <Sheet title="Edit Pinned" onClose={() => setEdit(false)}>
-          <p className="muted small">Pinned metrics appear on Summary. {list.length}/30 pinned.</p>
+          <p className="muted small">Pinned topics appear at the top of Summary. {list.length}/30 pinned.</p>
           <div className="group">
             {metrics.map((m) => {
               const on = list.includes(m.metric);
@@ -160,7 +76,7 @@ function Pinned({ metrics }: { metrics: BrowseMetric[] }) {
                 <button key={m.metric} className="row" onClick={() => save(on ? list.filter((x) => x !== m.metric) : [...list, m.metric].slice(0, 30))}>
                   <span className="row-icon"><CatIcon k={m.category} /></span>
                   <span className="row-label">{m.name}</span>
-                  <span className={on ? "pinmark on" : "pinmark"} aria-label={on ? "Unpin" : "Pin"}>{on ? "★" : "☆"}</span>
+                  <span className={on ? "pinmark on" : "pinmark"} aria-label={on ? "Unpin" : "Pin"}>{on ? "−" : "+"}</span>
                 </button>
               );
             })}
@@ -171,6 +87,27 @@ function Pinned({ metrics }: { metrics: BrowseMetric[] }) {
   );
 }
 
+function ActivityPinCard({ r }: { r: Activity["rings"] | null }) {
+  const n0 = (v: number) => Math.round(v).toLocaleString();
+  return (
+    <Link to={`/activity/${r?.date ?? today()}`} className="card pincard activity-pin">
+      <div className="pin-head" style={{ color: "var(--c-activity)" }}>
+        <CatIcon k="activity" /><b>Activity</b>
+        <span className="muted small pin-when">{r ? when(r.date + "T12:00:00") : ""} <ChevronCircle /></span>
+      </div>
+      <div className="pin-body activity-pin-body">
+        <div className="act-mini-stats">
+          <div><span className="as-label" style={{ color: "var(--move)" }}>Move</span><span className="num">{r ? `${n0(r.move_kcal)} cal` : "--"}</span></div>
+          <div><span className="as-label" style={{ color: "var(--exercise)" }}>Exercise</span><span className="num">{r ? `${n0(r.exercise_min)} min` : "--"}</span></div>
+          <div><span className="as-label" style={{ color: "var(--stand)" }}>Stand</span><span className="num">{r ? `${n0(r.stand_hours)} hr` : "--"}</span></div>
+        </div>
+        <FitRings v={r ? ringsOf(r) : null} size={56} />
+      </div>
+    </Link>
+  );
+}
+
+
 function PinCard({ m }: { m: BrowseMetric }) {
   const { units } = useHealth();
   const s = useApi<SeriesData>(`/series?metric=${encodeURIComponent(m.metric)}&bucket=day&days=14${m.last ? `&end=${m.last.slice(0, 10)}` : ""}`);
@@ -180,7 +117,7 @@ function PinCard({ m }: { m: BrowseMetric }) {
   const [v, u] = last ? conv(last.value, m.unit, units) : [0, ""];
   const label = m.metric.startsWith("HKCategory") ? (m.metric.includes("Sleep") ? "" : "") : m.metric === STEPS ? "STEPS" : u;
   return (
-    <Link to={`/browse/metric/${m.metric}`} className="card pincard">
+    <Link to={`/health/metric/${encodeURIComponent(m.metric)}`} className="card pincard">
       <div className="pin-head" style={{ color: c.color }}>
         <CatIcon k={m.category} /><b>{m.name}</b>
         <span className="muted small pin-when">{when(m.latest_at)} <ChevronCircle /></span>
@@ -193,59 +130,6 @@ function PinCard({ m }: { m: BrowseMetric }) {
   );
 }
 
-/* ---------- Highlights ---------- */
-
-function useWeekCompare(metric: string) {
-  const s = useApi<SeriesData>(`/series?metric=${encodeURIComponent(metric)}&bucket=day&days=56`);
-  return useMemo(() => {
-    const p = s.data?.points ?? [];
-    if (p.length < 8) return null;
-    const end = p[p.length - 1].date;
-    const inRange = (a: number, b: number) => p.filter((x) => x.date > addDays(end, -a) && x.date <= addDays(end, -b));
-    const avg = (xs: { value: number }[]) => (xs.length ? xs.reduce((a, x) => a + x.value, 0) / xs.length : 0);
-    return { now: avg(inRange(7, 0)), before: avg(inRange(56, 7)), unit: s.data?.unit ?? "" };
-  }, [s.data]);
-}
-
-function Highlight({ metric, name, color, unit }: { metric: string; name: string; color: string; unit: string }) {
-  const c = useWeekCompare(metric);
-  if (!c || !c.before) return null;
-  const up = c.now >= c.before;
-  const pct = Math.round(Math.abs(c.now / c.before - 1) * 100);
-  const max = Math.max(c.now, c.before);
-  return (
-    <Link to={`/browse/metric/${metric}`} className="card highlight">
-      <p className="hl-cat" style={{ color }}><CatIcon k="activity" /> {name}</p>
-      <p className="hl-text">
-        {pct < 3 ? `Your ${name.toLowerCase()} this week is about the same as your recent average.` :
-          up ? `You're averaging ${pct}% more ${name.toLowerCase()} this week than over the previous 7 weeks.` :
-          `You're averaging ${pct}% fewer ${name.toLowerCase()} this week than over the previous 7 weeks.`}
-      </p>
-      <div className="hl-bars">
-        {[["Last 7 days", c.now, color], ["Prior 7 weeks", c.before, "var(--muted)"]].map(([l, v, col]) => (
-          <div key={l as string}>
-            <span className="num" style={{ color: col as string }}><b>{n0(v as number)}</b> <small>{unit}/DAY</small></span>
-            <i style={{ width: `${((v as number) / max) * 100}%`, background: col as string }} />
-            <small className="muted">{l}</small>
-          </div>
-        ))}
-      </div>
-    </Link>
-  );
-}
-
-function Highlights() {
-  return (
-    <section className="highlights">
-      <div className="sec-head"><h2>Highlights</h2><Link to="/summary/trends" className="link">Trends</Link></div>
-      <div className="hlgrid">
-        <Highlight metric={STEPS} name="Steps" color="var(--steps)" unit="STEPS" />
-        <Highlight metric={ENERGY} name="Active Energy" color="var(--move)" unit="CAL" />
-      </div>
-      <Link to="/summary/trends" className="card linkrow">See your Trends <ChevronCircle /></Link>
-    </section>
-  );
-}
 
 /* ---------- Steps / Distance detail ---------- */
 
@@ -356,7 +240,6 @@ export function ActivityDay({ date }: { date: string }) {
   const st = useApi<{ values: number[] }>(hourly(STAND, date));
   const r = act.data?.rings?.date === date ? act.data.rings : null;
   const title = `${date === today() ? "Today, " : ""}${new Date(date + "T12:00:00").toLocaleDateString([], { weekday: date === today() ? undefined : "short", month: "short", day: "numeric", year: "numeric" })}`;
-  const hmTot = (m: number) => `${Math.floor(m / 60)}H ${Math.round(m % 60)}M`;
   const showAlert = date === today() && noGoals(r);
   return (
     <div className="page activityday">
@@ -380,17 +263,24 @@ export function ActivityDay({ date }: { date: string }) {
       {(r || date === today()) && <p className="muted small center"><Link to="/account/goals">{noGoals(r) ? "Set goals" : "Edit goals"}</Link></p>}
       <div className="act-charts">
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>
+        <div className="as-head">
+          <p className="as-label" style={{ color: "var(--move)" }}>Move</p>
+          <p className="as-of muted">{r ? `${n0(r.move_kcal)} of ${r.move_goal != null ? n0(r.move_goal) : "—"} cal` : "--"}</p>
+        </div>
         <HourChart values={mv.data?.values ?? Array(24).fill(0)} color="var(--move)" kind="bar" />
-        <p className="as-total">TOTAL {r ? n0(r.move_kcal) : 0} CAL</p>
       </section>
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Exercise</p><p className="as-val num" style={{ color: "var(--exercise)" }}>{r ? `${n0(r.exercise_min)}${ofGoal(r.exercise_goal)}` : "--"}<small>MIN</small></p></div></div>
+        <div className="as-head">
+          <p className="as-label" style={{ color: "var(--exercise)" }}>Exercise</p>
+          <p className="as-of muted">{r ? `${n0(r.exercise_min)} of ${r.exercise_goal != null ? n0(r.exercise_goal) : "—"} min` : "--"}</p>
+        </div>
         <HourChart values={ex.data?.values ?? Array(24).fill(0)} color="var(--exercise)" kind="bar" />
-        <p className="as-total">TOTAL {hmTot(r?.exercise_min ?? 0)}</p>
       </section>
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Stand</p><p className="as-val num" style={{ color: "var(--stand)" }}>{r ? `${n0(r.stand_hours)}${ofGoal(r.stand_goal)}` : "--"}<small>HRS</small></p></div></div>
+        <div className="as-head">
+          <p className="as-label" style={{ color: "var(--stand)" }}>Stand</p>
+          <p className="as-of muted">{r ? `${n0(r.stand_hours)} of ${r.stand_goal != null ? n0(r.stand_goal) : "—"} hr` : "--"}</p>
+        </div>
         <HourChart values={st.data?.values ?? Array(24).fill(0)} color="var(--stand)" kind="block" />
       </section>
       </div>

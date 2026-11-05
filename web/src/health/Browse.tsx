@@ -1,9 +1,10 @@
 // Browse: search, categories, metric lists, metric detail, all records.
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, Sleep } from "../api";
+import { Hypnogram, STAGES } from "../components/charts";
 import { Link } from "../router";
 import { conv, useHealth } from "./ctx";
-import { BrowseMetric, CATEGORIES, cat, CatIcon, Chevron, fmtNum, unitLabel, useBrowse, when, DEFAULT_PINNED } from "./meta";
+import { BrowseMetric, CATEGORIES, cat, CatIcon, Chevron, fmtNum, hm, SLEEP, unitLabel, useApi, useBrowse, when, DEFAULT_PINNED } from "./meta";
 import { Range, RangeChart, rangeLabel, Segmented, today, useRange } from "./range";
 import { LargeTitle, NavBar } from "./ui";
 import { Pager } from "./Summary";
@@ -14,7 +15,7 @@ function MetricRow({ m }: { m: BrowseMetric }) {
   const v = m.latest_value != null ? Number(m.latest_value) : NaN;
   const [cv, u] = conv(v, m.unit, units);
   return (
-    <Link to={`/browse/metric/${m.metric}`} className="row metricrow">
+    <Link to={`/health/metric/${encodeURIComponent(m.metric)}`} className="row metricrow">
       <span className="row-icon" style={{ color: c.color }}><CatIcon k={m.category} /></span>
       <span className="row-label"><b>{m.name}</b><small className="muted">{when(m.latest_at)}</small></span>
       <span className="row-value num">{isNaN(cv) ? "" : <>{fmtNum(cv, m.metric)} <small>{u || unitLabel(m)}</small></>}</span>
@@ -30,7 +31,7 @@ export default function Browse() {
   const hits = q ? ms.filter((m) => m.name.toLowerCase().includes(q.toLowerCase())) : [];
   return (
     <div className="page">
-      <LargeTitle title="Browse" />
+      <LargeTitle title="Health" />
       <input className="search" type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search health data" />
       {q ? (
         <div className="group">{hits.map((m) => <MetricRow key={m.metric} m={m} />)}{!hits.length && <p className="muted pad">No matches.</p>}</div>
@@ -39,7 +40,7 @@ export default function Browse() {
           <p className="group-title">Health Categories</p>
           <div className="group browse-cats">
             {CATEGORIES.filter((c) => ms.some((m) => m.category === c.key)).map((c) => (
-              <Link key={c.key} to={`/browse/${c.key}`} className="row">
+              <Link key={c.key} to={`/health/${c.key}`} className="row">
                 <span className="row-icon" style={{ color: c.color }}><CatIcon k={c.key} /></span>
                 <span className="row-label" style={{ color: c.color }}><b>{c.name}</b></span>
                 <span className="row-value muted">{ms.filter((m) => m.category === c.key).length}</span>
@@ -60,7 +61,7 @@ export function BrowseCategory({ k }: { k: string }) {
   const ms = (b.data?.metrics ?? []).filter((m) => m.category === k);
   return (
     <div className="page">
-      <NavBar to="/browse" />
+      <NavBar to="/health" />
       <LargeTitle title={c.name} avatar={false} />
       <div className="group">{ms.map((m) => <MetricRow key={m.metric} m={m} />)}</div>
     </div>
@@ -79,7 +80,7 @@ export function MetricDetail({ metric }: { metric: string }) {
   const anchor = b.data ? (m?.last?.slice(0, 10) ?? today()) : null;
   const d = useRange(metric, range, anchor, offset);
   useEffect(() => setSel(null), [range, offset]);
-  if (b.data && !m) return <div className="page"><NavBar to="/browse" /><p className="muted">No data for this metric.</p></div>;
+  if (b.data && !m) return <div className="page"><NavBar to="/health" /><p className="muted">No data for this metric.</p></div>;
   const c = cat(m?.category ?? "other");
   const bk = sel !== null ? d?.buckets[sel] : null;
   const val = bk ? bk.value : d?.summary;
@@ -91,25 +92,73 @@ export function MetricDetail({ metric }: { metric: string }) {
     setPins(next);
     await api("/pinned", { method: "PUT", body: { pinned: next } }).catch(() => {});
   };
-  const head = bk ? bk.title.toUpperCase() : d?.agg === "sum" ? (range === "D" ? "TOTAL" : "DAILY AVERAGE") : "AVERAGE";
   return (
     <div className="page detail">
-      <NavBar to={`/browse/${m?.category ?? ""}`} title={m?.name} right={<button className={pinned ? "pinbtn on" : "pinbtn"} onClick={toggle} aria-pressed={!!pinned}>{pinned ? "★ Pinned" : "☆ Pin"}</button>} />
+      <NavBar to={`/health/${m?.category ?? ""}`} title={m?.name} />
       <Segmented value={range} options={["D", "W", "M", "6M", "Y"]} onChange={(r) => { setRange(r); setOffset(0); }} />
-      <section className="card">
-        <p className="eyebrow">{head}</p>
-        <p className="big xl num" style={{ color: c.color }}>{val == null ? "--" : fmtNum(v, metric)}<small>{u || (m ? unitLabel(m) : "")}</small></p>
-        <p className="muted small">{d ? rangeLabel(range, d) : "…"}</p>
+      {metric === SLEEP && range === "D" ? (
+        <SleepDayCard anchor={anchor} offset={offset} setOffset={setOffset} color={c.color} />
+      ) : (
+      <section className="card chartcard">
+        <p className="eyebrow">{metric === SLEEP ? "TIME ASLEEP" : undefined}</p>
+        <p className="big xl num" style={{ color: c.color }}>
+          {val == null ? "--" : metric === SLEEP ? hm(v) : fmtNum(v, metric)}
+          <small>{metric === SLEEP ? "" : (u || (m ? unitLabel(m) : ""))}</small>
+        </p>
+        <p className="muted small">{bk ? bk.title : (d ? rangeLabel(range, d) : "…")}</p>
         <RangeChart buckets={d?.buckets ?? []} color={c.color} height={220} selected={sel} onSelect={setSel} onSwipe={(dir) => setOffset(Math.max(0, offset + dir))} dots={d?.agg !== "sum"} />
         <Pager offset={offset} setOffset={setOffset} />
       </section>
-      <div className="group aside">
-        <Link to={`/browse/metric/${metric}/all`} className="row"><span className="row-label">Show All Data</span><span className="row-value muted num">{m?.count.toLocaleString()}</span><Chevron /></Link>
-        {m && <div className="row static"><span className="row-label muted">First recorded</span><span className="row-value">{m.first?.slice(0, 10)}</span></div>}
+      )}
+      <p className="group-title">Options</p>
+      <div className="group">
+        <button type="button" className="row" onClick={toggle} disabled={!pins}>
+          <span className="row-label">{pinned ? "Remove from Pinned" : "Add to Pinned"}</span>
+          <span className={pinned ? "pinmark on" : "pinmark"} aria-hidden>{pinned ? "−" : "+"}</span>
+        </button>
+        <Link to={`/health/metric/${encodeURIComponent(metric)}/all`} className="row"><span className="row-label">Show All Data</span><span className="row-value muted num">{m?.count.toLocaleString()}</span><Chevron /></Link>
+        <div className="row static"><span className="row-label">Data Sources</span><span className="row-value muted">{m?.count ? "Imported" : "—"}</span></div>
+        <div className="row static"><span className="row-label">Unit</span><span className="row-value muted">{u || (m ? unitLabel(m) : "") || "—"}</span></div>
       </div>
+      <p className="group-foot">Pinned topics will appear at the top of Summary.</p>
     </div>
   );
 }
+
+function SleepDayCard({ anchor, offset, setOffset, color }: { anchor: string | null; offset: number; setOffset: (n: number) => void; color: string }) {
+  // end date shifted by pager offset
+  const end = anchor ? (() => {
+    const d = new Date(anchor + "T12:00:00");
+    d.setDate(d.getDate() - offset);
+    return d.toISOString().slice(0, 10);
+  })() : null;
+  const s = useApi<Sleep>(end ? `/dashboard/sleep?end=${end}&days=1` : null);
+  const night = s.data?.nights?.[0];
+  const asleep = night?.asleep_min ?? 0;
+  const hrs = Math.floor(asleep / 60);
+  const dateLabel = end ? new Date(end + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "…";
+  return (
+    <section className="card chartcard sleep-day">
+      <p className="eyebrow">TIME ASLEEP</p>
+      <p className="big xl num" style={{ color }}>{night ? hrs : "--"}<small>{night ? "hr" : ""}</small>
+        {night && asleep % 60 >= 1 ? <> {Math.round(asleep % 60)}<small>min</small></> : null}
+      </p>
+      <p className="muted small">{dateLabel}</p>
+      {s.data?.last_night?.length ? <Hypnogram segments={s.data.last_night} /> : <p className="muted">No sleep samples for this night.</p>}
+      {night && (
+        <div className="stage-totals">
+          {STAGES.map((st) => {
+            const key = { Awake: "awake_min", AsleepREM: "rem_min", AsleepCore: "core_min", AsleepDeep: "deep_min" }[st.key] as keyof NonNullable<typeof night>;
+            const v = Number(night[key] ?? 0);
+            return <div key={st.key}><i style={{ background: st.color }} /><span>{st.label}</span><b className="num">{hm(v)}</b></div>;
+          })}
+        </div>
+      )}
+      <Pager offset={offset} setOffset={setOffset} />
+    </section>
+  );
+}
+
 
 type Rec = { id: number; value: string | null; unit: string | null; start: string | null; end: string | null; source: string | null };
 
@@ -127,7 +176,7 @@ export function AllRecords({ metric }: { metric: string }) {
   useEffect(() => { load(); }, [metric]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="page">
-      <NavBar to={`/browse/metric/${metric}`} title="All Recorded Data" sub={m?.name} />
+      <NavBar to={`/health/metric/${encodeURIComponent(metric)}`} title="All Recorded Data" sub={m?.name} />
       <div className="group">
         {recs.map((r) => {
           const [v, u] = conv(Number(r.value), r.unit, units);

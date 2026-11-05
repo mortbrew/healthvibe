@@ -138,6 +138,7 @@ export default function Dashboard() {
               ))}
             </div>
           )}
+          <Link to="/dashboards/trends" className="small button">Trends</Link>
           <button className={editing ? "primary small" : "small"} onClick={() => { setEditing(!editing); setAdding(null); }}>
             {editing ? "Done" : "Edit"}
           </button>
