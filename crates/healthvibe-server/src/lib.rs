@@ -3,7 +3,13 @@
 mod api;
 mod sync;
 
-use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
+use axum::{
+    extract::State,
+    http::{header, HeaderValue, StatusCode},
+    response::Response,
+    routing::get,
+    Json, Router,
+};
 use healthvibe_core::config::Config;
 use serde_json::json;
 use tower_http::services::{ServeDir, ServeFile};
@@ -15,12 +21,53 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    let hsts = state
+        .config
+        .hsts_max_age
+        .and_then(|s| HeaderValue::from_str(&format!("max-age={s}")).ok());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .nest("/api/v1", api::routes())
         .fallback_service(spa(&state.config.web_dir))
         .with_state(state)
+        .layer(axum::middleware::map_response(move |res: Response| {
+            let hsts = hsts.clone();
+            async move { security_headers(res, hsts) }
+        }))
+}
+
+/// Content-Security-Policy for the built SPA: everything from this origin, no
+/// inline or eval'd script, no framing, no plugins. `data:`/`blob:` images
+/// cover the inline QR code and any generated images.
+pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
+img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; \
+object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
+/// Security headers on every response (API and SPA alike).
+fn security_headers(mut res: Response, hsts: Option<HeaderValue>) -> Response {
+    let h = res.headers_mut();
+    let set = |h: &mut axum::http::HeaderMap, k: header::HeaderName, v: &'static str| {
+        h.entry(k).or_insert(HeaderValue::from_static(v));
+    };
+    set(h, header::CONTENT_SECURITY_POLICY, CSP);
+    set(h, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+    set(h, header::REFERRER_POLICY, "no-referrer");
+    set(h, header::X_FRAME_OPTIONS, "DENY");
+    set(
+        h,
+        header::HeaderName::from_static("permissions-policy"),
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    );
+    set(
+        h,
+        header::HeaderName::from_static("cross-origin-opener-policy"),
+        "same-origin",
+    );
+    if let Some(v) = hsts {
+        h.entry(header::STRICT_TRANSPORT_SECURITY).or_insert(v);
+    }
+    res
 }
 
 /// Serve the built SPA; unknown paths get index.html (client-side routing).

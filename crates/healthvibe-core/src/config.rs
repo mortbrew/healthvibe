@@ -24,6 +24,9 @@ pub struct Config {
     pub hae_max_request_bytes: usize,
     /// Largest accepted export.zip upload in bytes (default 4 GiB).
     pub max_import_bytes: u64,
+    /// `Strict-Transport-Security` max-age in seconds. Off unless set: only
+    /// turn it on once HTTPS works for this hostname.
+    pub hsts_max_age: Option<u64>,
 }
 
 /// Default for `HEALTHVIBE_MAX_IMPORT_BYTES`: 4 GiB.
@@ -58,6 +61,10 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .filter(|&n: &u64| n > 0)
                 .unwrap_or(DEFAULT_MAX_IMPORT_BYTES),
+            hsts_max_age: std::env::var("HEALTHVIBE_HSTS_MAX_AGE")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|&n: &u64| n > 0),
         }
     }
 

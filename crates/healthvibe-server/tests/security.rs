@@ -164,3 +164,39 @@ async fn startup_cleanup_removes_leftovers_only() {
     assert_eq!(status, "failed");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+async fn get(app: &Router, uri: &str) -> axum::http::Response<Body> {
+    app.clone()
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn security_headers_on_api_and_spa() {
+    let web = temp_dir("web");
+    std::fs::write(web.join("index.html"), "<!doctype html><div id=root></div>").unwrap();
+    let (app, _db, _) = app_with(|c| {
+        c.web_dir = web.clone();
+        c.hsts_max_age = None;
+    })
+    .await;
+    for uri in ["/healthz", "/api/v1/session", "/", "/some/client/route"] {
+        let res = get(&app, uri).await;
+        let h = res.headers();
+        let csp = h[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(csp.contains("default-src 'self'"), "{uri}");
+        assert!(csp.contains("frame-ancestors 'none'"));
+        assert!(csp.contains("object-src 'none'"));
+        assert!(!csp.contains("unsafe-inline") && !csp.contains("unsafe-eval"));
+        assert_eq!(h[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(h[header::REFERRER_POLICY], "no-referrer");
+        assert_eq!(h[header::X_FRAME_OPTIONS], "DENY");
+        assert!(h.contains_key("permissions-policy"));
+        assert!(!h.contains_key(header::STRICT_TRANSPORT_SECURITY), "HSTS is opt-in");
+    }
+    let (app, _db, _) = app_with(|c| c.hsts_max_age = Some(31536000)).await;
+    let res = get(&app, "/healthz").await;
+    assert_eq!(res.headers()[header::STRICT_TRANSPORT_SECURITY], "max-age=31536000");
+    let _ = std::fs::remove_dir_all(&web);
+}
