@@ -31,6 +31,22 @@ enum Cmd {
         )]
         addr: String,
     },
+    /// Write deterministic synthetic demo data for a user (channel `demo`).
+    /// Clears prior demo-channel rows for that user first. Not real health data.
+    SeedDemo {
+        /// User id to fill (default: 1, the first account).
+        #[arg(long, default_value = "1")]
+        user: i64,
+        /// How many local days to generate, ending on `--end`.
+        #[arg(long, default_value = "28")]
+        days: i64,
+        /// Inclusive end date `YYYY-MM-DD` (default: today UTC).
+        #[arg(long)]
+        end: Option<String>,
+        /// RNG seed for reproducibility.
+        #[arg(long, default_value = "42")]
+        seed: u64,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -52,6 +68,38 @@ fn main() -> anyhow::Result<()> {
             } else {
                 std::process::exit(1)
             }
+        }
+        Cmd::SeedDemo {
+            user,
+            days,
+            end,
+            seed,
+        } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_env("RUST_LOG")
+                        .unwrap_or_else(|_| "info".into()),
+                )
+                .init();
+            let cfg = Config::from_env();
+            tokio::runtime::Runtime::new()?.block_on(async move {
+                let db = healthvibe_core::db::open(&cfg).await?;
+                let report = healthvibe_core::seed::seed_demo(
+                    &db,
+                    healthvibe_core::seed::SeedOpts {
+                        user_id: user,
+                        days,
+                        end,
+                        rng_seed: seed,
+                    },
+                )
+                .await?;
+                println!(
+                    "seeded demo data for user {user}: {} readings, {} workouts, {} goal days ({} days, seed {seed})",
+                    report.readings, report.workouts, report.goals, report.days
+                );
+                Ok(())
+            })
         }
     }
 }

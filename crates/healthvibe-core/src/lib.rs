@@ -13,5 +13,6 @@ pub mod hae;
 pub mod handoff;
 pub mod import;
 pub mod profile;
+pub mod seed;
 pub mod shortcut;
 pub mod stats;
