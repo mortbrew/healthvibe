@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Activity, api, Body, Dashboard as Dash, explain, Heart, Metric, SeriesData, Sleep, Widget } from "../api";
 import { Bars, Hypnogram, Lines, Rings, STAGES } from "../components/charts";
 import { Link } from "../router";
-import { ofGoal } from "../health/rings";
+import { GoalFrom, ofGoal } from "../health/rings";
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const hm = (min: number) => `${Math.floor(min / 60)}h ${String(Math.round(min % 60)).padStart(2, "0")}m`;
@@ -372,6 +372,7 @@ function ActivityCard({ a }: { a: Activity }) {
           </dl>
         </div>
       )}
+      {r && <GoalFrom r={r} />}
     </section>
   );
 }

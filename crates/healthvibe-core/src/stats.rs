@@ -114,13 +114,71 @@ pub async fn daily_avg(
 pub struct Rings {
     pub date: String,
     pub move_kcal: f64,
-    /// Goals only from that exact day's ActivitySummary; None if it has none.
+    /// Imported ActivitySummary goal; see [`RingGoals`].
     pub move_goal: Option<f64>,
+    pub move_goal_from: Option<String>,
     pub exercise_min: f64,
     pub exercise_goal: Option<f64>,
+    pub exercise_goal_from: Option<String>,
     pub stand_hours: f64,
     pub stand_goal: Option<f64>,
+    pub stand_goal_from: Option<String>,
     pub steps: f64,
+}
+
+/// One day's ring goals, per ring. A goal is that day's imported
+/// ActivitySummary value, or else the most recent earlier imported value for
+/// that ring (`*_from` is then that earlier date). Before the first imported
+/// goal there is none. Never a default.
+#[derive(Debug, Default, PartialEq)]
+pub struct RingGoals {
+    pub move_goal: Option<f64>,
+    pub move_goal_from: Option<String>,
+    pub exercise_goal: Option<f64>,
+    pub exercise_goal_from: Option<String>,
+    pub stand_goal: Option<f64>,
+    pub stand_goal_from: Option<String>,
+}
+
+/// `(date, move_kcal, exercise_min, stand_hours)` from `activity_goals_best`.
+pub type GoalRow = (String, Option<f64>, Option<f64>, Option<f64>);
+
+/// Imported goal rows for a user up to and including `end`, oldest first.
+pub async fn goal_rows_upto(
+    db: &SqlitePool,
+    user_id: i64,
+    end: &str,
+) -> anyhow::Result<Vec<GoalRow>> {
+    Ok(sqlx::query_as(
+        "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals_best
+         WHERE user_id = ? AND date <= ? ORDER BY date",
+    )
+    .bind(user_id)
+    .bind(end)
+    .fetch_all(db)
+    .await?)
+}
+
+/// Goals for `date` from `rows` (sorted by date, as [`goal_rows_upto`] returns).
+pub fn goals_for(rows: &[GoalRow], date: &str) -> RingGoals {
+    let upto = &rows[..rows.partition_point(|r| r.0.as_str() <= date)];
+    let pick = |f: fn(&GoalRow) -> Option<f64>| -> (Option<f64>, Option<String>) {
+        match upto.iter().rev().find_map(|r| f(r).map(|v| (v, &r.0))) {
+            Some((v, d)) => (Some(v), (d != date).then(|| d.clone())),
+            None => (None, None),
+        }
+    };
+    let (move_goal, move_goal_from) = pick(|r| r.1);
+    let (exercise_goal, exercise_goal_from) = pick(|r| r.2);
+    let (stand_goal, stand_goal_from) = pick(|r| r.3);
+    RingGoals {
+        move_goal,
+        move_goal_from,
+        exercise_goal,
+        exercise_goal_from,
+        stand_goal,
+        stand_goal_from,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -177,24 +235,20 @@ pub async fn activity(
     .bind(shift(&date, 1))
     .fetch_one(db)
     .await?;
-    // Goals: only this exact day's <ActivitySummary>. No carry-forward, no defaults.
-    let g: Option<(Option<f64>, Option<f64>, Option<f64>)> = sqlx::query_as(
-        "SELECT move_kcal, exercise_min, stand_hours FROM activity_goals_best
-         WHERE user_id = ? AND date = ?",
-    )
-    .bind(user_id)
-    .bind(&date)
-    .fetch_optional(db)
-    .await?;
-    let (gm, ge, gs) = g.unwrap_or((None, None, None));
+    // Goals: imported ActivitySummary goals only (that day's, else the latest
+    // earlier one per ring). No defaults.
+    let g = goals_for(&goal_rows_upto(db, user_id, &date).await?, &date);
     let rings = Rings {
         date: date.clone(),
         move_kcal: on(&energy, &date),
-        move_goal: gm,
+        move_goal: g.move_goal,
+        move_goal_from: g.move_goal_from,
         exercise_min: on(&exercise, &date),
-        exercise_goal: ge,
+        exercise_goal: g.exercise_goal,
+        exercise_goal_from: g.exercise_goal_from,
         stand_hours: stand as f64,
-        stand_goal: gs,
+        stand_goal: g.stand_goal,
+        stand_goal_from: g.stand_goal_from,
         steps: on(&steps, &date),
     };
     Ok(Activity {
@@ -560,45 +614,98 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ring_goals_only_from_that_days_activity_summary() {
+    async fn ring_goals_from_that_day_else_latest_earlier_import() {
         let db = seeded().await;
         let latest = latest_day(&db, 1).await.unwrap().unwrap();
         let r = activity(&db, 1, None).await.unwrap().rings.unwrap();
-        // No ActivitySummary: no goal at all (no default).
+        // No ActivitySummary at all: no goal (no default).
         assert_eq!(
             (r.move_goal, r.exercise_goal, r.stand_goal),
             (None, None, None)
         );
+        assert_eq!(r.move_goal_from, None);
         sqlx::query(
             "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
              VALUES (1, ?, 'export_xml', 650, 45, NULL),
                     (1, ?, 'demo', 111, 11, 11),
                     (1, '2000-01-01', 'export_xml', 999, 99, 9),
-                    (2, ?, 'export_xml', 900, 60, 8)",
+                    (1, '2000-01-03', 'export_xml', 500, NULL, NULL),
+                    (2, '1999-12-01', 'export_xml', 900, 60, 8)",
         )
-        .bind(&latest)
         .bind(&latest)
         .bind(&latest)
         .execute(&db)
         .await
         .unwrap();
-        // export_xml beats demo for the whole row (its NULL stand goal is not
-        // filled from demo); user 2's goals never apply.
-        let r = activity(&db, 1, None).await.unwrap().rings.unwrap();
-        assert_eq!(
-            (r.move_goal, r.exercise_goal, r.stand_goal),
-            (Some(650.0), Some(45.0), None)
-        );
-        // An earlier day's goal does not carry forward to a later day.
-        let r = activity(&db, 1, Some("2000-01-02".into()))
-            .await
-            .unwrap()
-            .rings
-            .unwrap();
+        let ring = |d: &str| {
+            let db = db.clone();
+            let d = d.to_string();
+            async move { activity(&db, 1, Some(d)).await.unwrap().rings.unwrap() }
+        };
+        // Before the first imported goal: none (user 2's goals never apply).
+        let r = ring("1999-12-31").await;
         assert_eq!(
             (r.move_goal, r.exercise_goal, r.stand_goal),
             (None, None, None)
         );
+        // The day's own goals: no `_from` date.
+        let r = ring("2000-01-01").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(999.0), Some(99.0), Some(9.0))
+        );
+        assert_eq!(
+            (r.move_goal_from, r.exercise_goal_from, r.stand_goal_from),
+            (None, None, None)
+        );
+        // A day without a summary reuses the latest earlier one.
+        let r = ring("2000-01-02").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(999.0), Some(99.0), Some(9.0))
+        );
+        let from = Some("2000-01-01".to_string());
+        assert_eq!(r.move_goal_from, from);
+        assert_eq!(r.stand_goal_from, from);
+        // Per ring: 01-03 has its own move goal; exercise/stand come from 01-01.
+        let r = ring("2000-01-05").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(500.0), Some(99.0), Some(9.0))
+        );
+        assert_eq!(
+            (r.move_goal_from.as_deref(), r.exercise_goal_from.as_deref()),
+            (Some("2000-01-03"), Some("2000-01-01"))
+        );
+        // export_xml beats demo for the whole row on `latest`; its missing stand
+        // goal is not taken from demo but from the latest earlier import.
+        let r = ring(&latest).await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(650.0), Some(45.0), Some(9.0))
+        );
+        assert_eq!(
+            (r.move_goal_from, r.stand_goal_from.as_deref()),
+            (None, Some("2000-01-01"))
+        );
+        // rings_span applies the same rule day by day.
+        let days = crate::browse::rings_span(&db, 1, "1999-12-31", "2000-01-03", 10)
+            .await
+            .unwrap();
+        let got: Vec<_> = days
+            .iter()
+            .map(|d| (d.move_goal, d.move_goal_from.as_deref(), d.exercise_goal))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (None, None, None),
+                (Some(999.0), None, Some(99.0)),
+                (Some(999.0), Some("2000-01-01"), Some(99.0)),
+                (Some(500.0), None, Some(99.0)),
+            ]
+        );
+        assert_eq!(days[3].exercise_goal_from.as_deref(), Some("2000-01-01"));
     }
 
     #[tokio::test]

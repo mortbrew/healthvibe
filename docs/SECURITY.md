@@ -297,10 +297,12 @@ where provider keys are stored (planned: encrypted under the per-user key, see
 
 healthvibe shows only what was imported, plus daily totals and unit
 conversions. It does not work out heart-rate zones, workout heart-rate
-averages from samples, sleep sessions or naps, streaks, or default or
-carried-forward ring goals, and there is no awards feature. Sleep is shown as
-the raw stage samples, each counted on the local date its sample **ends**. A
-day without an imported ring goal shows no goal.
+averages from samples, sleep sessions or naps, streaks, or default ring goals,
+and there is no awards feature. Sleep is shown as the raw stage samples, each
+counted on the local date its sample **ends**. A day without an imported ring
+goal shows the most recent earlier imported goal for that ring, labelled with
+its date (for example "Goal from Nov 2"); days before the first imported goal
+show no goal.
 
 ## 9. Threat model
 

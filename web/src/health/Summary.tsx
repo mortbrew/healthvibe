@@ -5,12 +5,12 @@ import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
 import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, ENERGY, fmtNum, Spark, STEPS, unitLabel, useApi, useBrowse, when } from "./meta";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
-import { FitRings, ofGoal, ringsOf } from "./rings";
+import { FitRings, GoalFrom, ofGoal, ringsOf } from "./rings";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
-export type RingDay = { date: string; move_kcal: number; move_goal: number | null; exercise_min: number; exercise_goal: number | null; stand_hours: number; stand_goal: number | null; workout: boolean };
+export type RingDay = { date: string; move_kcal: number; move_goal: number | null; move_goal_from: string | null; exercise_min: number; exercise_goal: number | null; exercise_goal_from: string | null; stand_hours: number; stand_goal: number | null; stand_goal_from: string | null; workout: boolean };
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const hourly = (m: string, d?: string | null) => `/hourly?metric=${encodeURIComponent(m)}${d ? `&date=${d}` : ""}`;
@@ -71,6 +71,7 @@ export default function Summary() {
             <div><dt>Stand</dt><dd style={{ color: "var(--stand)" }}><span className="num">{r ? `${n0(r.stand_hours)}${ofGoal(r.stand_goal)}` : "--"}</span><small>HRS</small></dd></div>
           </dl>
         </div>
+        {r && <GoalFrom r={r} />}
         {r && r.move_goal == null && r.exercise_goal == null && r.stand_goal == null && <p className="muted small">No ring goals in your data for this day.</p>}
         {r && r.date !== today() && <p className="muted small">Latest data: {dayTitle(r.date)}</p>}
       </Link>
@@ -368,6 +369,7 @@ export function ActivityDay({ date }: { date: string }) {
         })}
       </div>
       <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} /></div>
+      {r && <GoalFrom r={r} className="center" />}
       <div className="act-charts">
       <section className="actsec">
         <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>

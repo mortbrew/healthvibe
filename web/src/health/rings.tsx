@@ -1,6 +1,7 @@
 // Fitness-style activity rings (original drawing): thick round caps, dim track, arrows at 12 o'clock.
-// A goal is null when the imported data has no ActivitySummary goal for that day:
-// the ring then shows only its track (no percentage).
+// A goal is the day's imported ActivitySummary goal, else the latest earlier
+// imported one (then `*_goal_from` is that date, shown by <GoalFrom>). Before the
+// first imported goal it is null: the ring then shows only its track.
 export type RingVals = { move: [number, number | null]; exercise: [number, number | null]; stand: [number, number | null] };
 
 function One({ r, w, frac, color, arrow, dim }: { r: number; w: number; frac: number; color: string; arrow?: number; dim?: boolean }) {
@@ -50,3 +51,21 @@ export const ringsOf = (d: { move_kcal: number; move_goal: number | null; exerci
   stand: [d.stand_hours, d.stand_goal],
 });
 
+
+export type GoalFromDates = { move_goal_from?: string | null; exercise_goal_from?: string | null; stand_goal_from?: string | null };
+
+const shortDay = (d: string) => new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
+
+/** "Goal from Nov 2" when a ring's goal was imported on an earlier day; nothing otherwise. */
+export function GoalFrom({ r, className }: { r: GoalFromDates; className?: string }) {
+  const parts: [string, string][] = (
+    [["Move", r.move_goal_from], ["Exercise", r.exercise_goal_from], ["Stand", r.stand_goal_from]] as [string, string | null | undefined][]
+  ).filter((x): x is [string, string] => !!x[1]);
+  if (!parts.length) return null;
+  const dates = [...new Set(parts.map((x) => x[1]))];
+  const text =
+    dates.length === 1
+      ? `${parts.length === 3 ? "Goals" : parts.map((x) => x[0]).join(" and ") + " goal"} from ${shortDay(dates[0])}`
+      : parts.map(([k, d]) => `${k} goal from ${shortDay(d)}`).join(" · ");
+  return <p className={`muted small goalfrom ${className ?? ""}`.trim()} title="This day has no imported goal; the latest earlier imported goal is shown.">{text}</p>;
+}

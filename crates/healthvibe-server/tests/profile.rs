@@ -179,8 +179,8 @@ async fn profile_round_trip_isolation_and_validation() {
             400
         );
     }
-    // Goals come only from that exact day's ActivitySummary: an earlier day's
-    // goal does not carry forward and there is no default.
+    // Goals are imported only: that day's ActivitySummary, else the latest
+    // earlier imported one (labelled with its date), never a default.
     sqlx::query("INSERT INTO activity_goals (user_id, date, stand_hours) VALUES (1, '2026-01-01', 10), (1, '2026-01-06', 11)")
         .execute(&db)
         .await
@@ -194,10 +194,13 @@ async fn profile_round_trip_isolation_and_validation() {
         None,
     )
     .await;
-    assert!(v["days"][0]["stand_goal"].is_null());
+    assert_eq!(v["days"][0]["stand_goal"], 10.0);
+    assert_eq!(v["days"][0]["stand_goal_from"], "2026-01-01");
     assert!(v["days"][0]["move_goal"].is_null());
+    assert!(v["days"][0]["move_goal_from"].is_null());
     assert_eq!(v["days"][0]["move_kcal"], 10.0);
     assert_eq!(v["days"][1]["stand_goal"], 11.0);
+    assert!(v["days"][1]["stand_goal_from"].is_null());
     let (_, v, _) = call(
         &app,
         "GET",
@@ -206,8 +209,20 @@ async fn profile_round_trip_isolation_and_validation() {
         None,
     )
     .await;
-    assert!(v["rings"]["stand_goal"].is_null());
+    assert_eq!(v["rings"]["stand_goal"], 10.0);
+    assert_eq!(v["rings"]["stand_goal_from"], "2026-01-01");
     assert_eq!(v["rings"]["move_kcal"], 10.0);
+    // Before the first imported goal there is none.
+    let (_, v, _) = call(
+        &app,
+        "GET",
+        "/api/v1/dashboard/activity?end=2025-12-31",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert!(v["rings"]["stand_goal"].is_null());
+    assert!(v["rings"]["stand_goal_from"].is_null());
 }
 
 #[tokio::test]

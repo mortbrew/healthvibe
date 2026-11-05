@@ -70,10 +70,13 @@ export type Activity = {
     date: string;
     move_kcal: number;
     move_goal: number | null;
+    move_goal_from: string | null;
     exercise_min: number;
     exercise_goal: number | null;
+    exercise_goal_from: string | null;
     stand_hours: number;
     stand_goal: number | null;
+    stand_goal_from: string | null;
     steps: number;
   };
   steps: DayValue[];
