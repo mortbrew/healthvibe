@@ -38,6 +38,8 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
 
 export const messages: Record<string, string> = {
   invalid_credentials: "Wrong username/email or password.",
+  account_locked: "Too many failed sign-ins. Try again in 15 minutes.",
+  rate_limited: "Too many attempts. Wait a few minutes and try again.",
   password_too_short: "Passwords need at least 12 characters.",
   invalid_username: "Use a username or email address: letters, digits and @ . + - _ only (max 254 characters).",
   username_taken: "That username or email is already taken.",

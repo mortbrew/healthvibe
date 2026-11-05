@@ -152,17 +152,103 @@ pub async fn change_password(
     Ok(true)
 }
 
-/// Returns the user id when username/password match.
-pub async fn login(db: &SqlitePool, user: &str, pw: &str) -> anyhow::Result<Option<i64>> {
+/// Failure-only account lockout: 5 failed attempts → 15 minutes locked.
+/// Successful login clears the counter. Unknown usernames still record a
+/// failure against the attempted name so enumerating accounts isn't free.
+pub const MAX_LOGIN_FAILURES: i64 = 5;
+pub const LOCKOUT_MINUTES: i64 = 15;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginResult {
+    Ok(i64),
+    BadCredentials,
+    Locked { until: String },
+}
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+async fn locked_until(db: &SqlitePool, username: &str) -> anyhow::Result<Option<String>> {
+    let row: Option<(i64, Option<String>)> = sqlx::query_as(
+        "SELECT fail_count, locked_until FROM auth_failures WHERE username = ?",
+    )
+    .bind(username)
+    .fetch_optional(db)
+    .await?;
+    let Some((_n, until)) = row else { return Ok(None) };
+    let Some(until) = until else { return Ok(None) };
+    if until > now_rfc3339() {
+        Ok(Some(until))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn record_failure(db: &SqlitePool, username: &str) -> anyhow::Result<Option<String>> {
+    let now = now_rfc3339();
+    sqlx::query(
+        "INSERT INTO auth_failures (username, fail_count, locked_until, updated_at)
+         VALUES (?, 1, NULL, ?)
+         ON CONFLICT (username) DO UPDATE SET
+           fail_count = auth_failures.fail_count + 1,
+           updated_at = excluded.updated_at",
+    )
+    .bind(username)
+    .bind(&now)
+    .execute(db)
+    .await?;
+    let count: i64 = sqlx::query_scalar("SELECT fail_count FROM auth_failures WHERE username = ?")
+        .bind(username)
+        .fetch_one(db)
+        .await?;
+    if count >= MAX_LOGIN_FAILURES {
+        let until = (chrono::Utc::now() + chrono::Duration::minutes(LOCKOUT_MINUTES)).to_rfc3339();
+        sqlx::query(
+            "UPDATE auth_failures SET locked_until = ?, fail_count = 0, updated_at = ? WHERE username = ?",
+        )
+        .bind(&until)
+        .bind(&now)
+        .bind(username)
+        .execute(db)
+        .await?;
+        return Ok(Some(until));
+    }
+    Ok(None)
+}
+
+async fn clear_failures(db: &SqlitePool, username: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM auth_failures WHERE username = ?")
+        .bind(username)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Attempt login. Only failed attempts count toward lockout; success resets.
+pub async fn login(db: &SqlitePool, user: &str, pw: &str) -> anyhow::Result<LoginResult> {
+    let username = normalize_username(user);
+    if let Some(until) = locked_until(db, &username).await? {
+        return Ok(LoginResult::Locked { until });
+    }
     let row: Option<(i64, Option<String>)> =
         sqlx::query_as("SELECT id, password_hash FROM users WHERE lower(username) = ?")
-            .bind(normalize_username(user))
+            .bind(&username)
             .fetch_optional(db)
             .await?;
-    Ok(match row {
-        Some((id, Some(h))) if verify_password(pw, &h) => Some(id),
-        _ => None,
-    })
+    match row {
+        Some((id, Some(h))) if verify_password(pw, &h) => {
+            clear_failures(db, &username).await?;
+            Ok(LoginResult::Ok(id))
+        }
+        _ => {
+            if let Some(until) = record_failure(db, &username).await? {
+                Ok(LoginResult::Locked { until })
+            } else {
+                Ok(LoginResult::BadCredentials)
+            }
+        }
+    }
 }
 
 /// Create a session; returns the raw cookie token.
@@ -244,8 +330,13 @@ mod tests {
             !setup_admin(&db, "x", "again again again").await.unwrap(),
             "setup only once"
         );
-        assert_eq!(login(&db, "admin", "wrong").await.unwrap(), None);
-        let uid = login(&db, "admin", "correct horse").await.unwrap().unwrap();
+        assert_eq!(
+            login(&db, "admin", "wrong").await.unwrap(),
+            LoginResult::BadCredentials
+        );
+        let LoginResult::Ok(uid) = login(&db, "admin", "correct horse").await.unwrap() else {
+            panic!("expected ok");
+        };
         let tok = create_session(&db, uid).await.unwrap();
         assert_eq!(session_user(&db, &tok).await.unwrap(), Some(1));
         delete_session(&db, &tok).await.unwrap();
@@ -286,5 +377,41 @@ mod tests {
                 .unwrap()
                 .must_change_password
         );
+    }
+
+    #[tokio::test]
+    async fn failure_only_lockout() {
+        let db = crate::db::open_memory().await.unwrap();
+        setup_admin(&db, "admin", "correct horse!!").await.unwrap();
+        for _ in 0..(MAX_LOGIN_FAILURES - 1) {
+            assert_eq!(
+                login(&db, "admin", "nope").await.unwrap(),
+                LoginResult::BadCredentials
+            );
+        }
+        let locked = login(&db, "admin", "nope").await.unwrap();
+        assert!(matches!(locked, LoginResult::Locked { .. }), "{locked:?}");
+        // Even the right password is rejected while locked.
+        assert!(matches!(
+            login(&db, "admin", "correct horse!!").await.unwrap(),
+            LoginResult::Locked { .. }
+        ));
+        // Simulate lockout expiry.
+        sqlx::query("UPDATE auth_failures SET locked_until = ?")
+            .bind("2000-01-01T00:00:00+00:00")
+            .execute(&db)
+            .await
+            .unwrap();
+        let LoginResult::Ok(_) = login(&db, "admin", "correct horse!!").await.unwrap() else {
+            panic!("expected unlock after expiry");
+        };
+        // Success cleared failures: one wrong does not lock.
+        assert_eq!(
+            login(&db, "admin", "nope").await.unwrap(),
+            LoginResult::BadCredentials
+        );
+        let LoginResult::Ok(_) = login(&db, "admin", "correct horse!!").await.unwrap() else {
+            panic!("expected ok after single fail");
+        };
     }
 }

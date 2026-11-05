@@ -180,10 +180,29 @@ async fn setup(State(st): State<AppState>, Json(c): Json<Credentials>) -> ApiRes
     start_session(&st, 1).await
 }
 
-async fn login(State(st): State<AppState>, Json(c): Json<Credentials>) -> ApiResult<Response> {
+async fn login(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(c): Json<Credentials>,
+) -> ApiResult<Response> {
+    let ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.rsplit(',').next())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "unknown".into());
+    if !crate::sync::allow(format!("login-ip:{ip}"), 60, std::time::Duration::from_secs(600)) {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
+    }
     match auth::login(&st.db, &auth::normalize_username(&c.username), &c.password).await? {
-        Some(id) => start_session(&st, id).await,
-        None => Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials")),
+        auth::LoginResult::Ok(id) => start_session(&st, id).await,
+        auth::LoginResult::BadCredentials => {
+            Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials"))
+        }
+        auth::LoginResult::Locked { .. } => {
+            Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "account_locked"))
+        }
     }
 }
 

@@ -55,7 +55,7 @@ pub fn routes() -> Router<AppState> {
 // ------------------------------------------------------------ rate limits
 
 /// Fixed-window counter: at most `max` hits per `window` per key.
-fn allow(key: String, max: u32, window: Duration) -> bool {
+pub(crate) fn allow(key: String, max: u32, window: Duration) -> bool {
     static HITS: OnceLock<Mutex<HashMap<String, (Instant, u32)>>> = OnceLock::new();
     let mut m = HITS
         .get_or_init(Default::default)
@@ -82,7 +82,7 @@ fn too_many() -> ApiError {
 
 /// Client address: the last X-Forwarded-For hop (added by the reverse
 /// proxy, so it can't be forged by the client) or the TCP peer.
-fn client_ip(p: &Parts) -> String {
+pub(crate) fn client_ip(p: &Parts) -> String {
     if let Some(ip) = p
         .headers
         .get("x-forwarded-for")
