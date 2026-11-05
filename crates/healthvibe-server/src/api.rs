@@ -306,19 +306,42 @@ async fn create_user(
     }
 }
 
-async fn upload(State(st): State<AppState>, User(u): User, mut mp: Multipart) -> ApiResult {
+async fn upload(
+    State(st): State<AppState>,
+    User(u): User,
+    h: HeaderMap,
+    mut mp: Multipart,
+) -> ApiResult {
+    let limit = st.config.max_import_bytes;
+    let too_large = ApiError(StatusCode::PAYLOAD_TOO_LARGE, "upload_too_large");
+    // Cheap early reject when the client announces the size (allowing a little
+    // for multipart framing; the file bytes themselves are checked below).
+    let announced = h
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    if announced.is_some_and(|n| n > limit.saturating_add(64 * 1024)) {
+        return Err(too_large);
+    }
     let path = st
         .config
         .staging_dir
         .join(format!("upload-{:016x}.zip", rand::random::<u64>()));
     let mut got = false;
+    let mut over = false;
     let res: anyhow::Result<()> = async {
         while let Some(mut field) = mp.next_field().await? {
             if field.name() != Some("file") {
                 continue;
             }
             let mut f = tokio::fs::File::create(&path).await?;
+            let mut written: u64 = 0;
             while let Some(chunk) = field.chunk().await? {
+                written += chunk.len() as u64;
+                if written > limit {
+                    over = true;
+                    return Ok(());
+                }
                 f.write_all(&chunk).await?;
             }
             f.flush().await?;
@@ -328,6 +351,11 @@ async fn upload(State(st): State<AppState>, User(u): User, mut mp: Multipart) ->
         Ok(())
     }
     .await;
+    if over {
+        let _ = tokio::fs::remove_file(&path).await;
+        tracing::warn!(limit, "upload over HEALTHVIBE_MAX_IMPORT_BYTES rejected");
+        return Err(too_large);
+    }
     if let Err(e) = res {
         let _ = tokio::fs::remove_file(&path).await;
         tracing::warn!(error = %e, "upload failed");

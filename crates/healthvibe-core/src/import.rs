@@ -444,6 +444,36 @@ pub async fn run_job(db: &SqlitePool, job_id: i64, user_id: i64, path: &Path) {
     tracing::info!(job_id, ok = result.is_ok(), "import finished");
 }
 
+/// True for files healthvibe itself leaves in the staging directory: staged
+/// uploads (`upload-*`) and other temporary files (`*.tmp`, `*.part`).
+pub fn is_staging_leftover(name: &str) -> bool {
+    name.starts_with("upload-") || name.ends_with(".tmp") || name.ends_with(".part")
+}
+
+/// Startup cleanup after a crash or restart: delete leftover staged uploads and
+/// temp files (regular files directly in `dir` only; nothing else is touched),
+/// and mark imports that were still running as failed, since their zip is gone.
+/// Returns how many files were removed.
+pub async fn cleanup_staging(db: &SqlitePool, dir: &Path) -> anyhow::Result<usize> {
+    let mut removed = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            let name = e.file_name();
+            if ft.is_file() && is_staging_leftover(&name.to_string_lossy()) && std::fs::remove_file(e.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    sqlx::query(
+        "UPDATE import_jobs SET status='failed', error='interrupted by a server restart; upload again', finished_at=? WHERE status='running'",
+    )
+    .bind(chrono::Utc::now().to_rfc3339())
+    .execute(db)
+    .await?;
+    Ok(removed)
+}
+
 pub async fn create_job(db: &SqlitePool, user_id: i64) -> anyhow::Result<i64> {
     Ok(sqlx::query_scalar(
         "INSERT INTO import_jobs (user_id, status) VALUES (?, 'running') RETURNING id",

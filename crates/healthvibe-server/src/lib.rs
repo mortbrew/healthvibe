@@ -48,6 +48,10 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
     tracing::info!(bind = %config.bind, "healthvibe listening");
     let db = healthvibe_core::db::open(&config).await?;
+    let removed = healthvibe_core::import::cleanup_staging(&db, &config.staging_dir).await?;
+    if removed > 0 {
+        tracing::info!(removed, "removed leftover staged uploads");
+    }
     let app = router(AppState { config, db });
     axum::serve(
         listener,

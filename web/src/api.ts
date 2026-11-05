@@ -46,6 +46,7 @@ export const messages: Record<string, string> = {
   already_set_up: "This server is already set up. Sign in instead.",
   handoff_invalid: "This link was already used or has expired. Make a new QR code in healthvibe on your computer.",
   upload_failed: "The upload failed. Try again.",
+  upload_too_large: "That file is larger than this server accepts (HEALTHVIBE_MAX_IMPORT_BYTES).",
   missing_file: "Pick an export.zip file first.",
   no_metrics: "Choose at least one thing to sync.",
   choose_metrics_first: "Choose what to sync in Settings first.",

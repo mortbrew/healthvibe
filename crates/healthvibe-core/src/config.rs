@@ -22,7 +22,12 @@ pub struct Config {
     pub max_request_bytes: usize,
     /// Largest accepted Health Auto Export upload in bytes (default 256 MiB).
     pub hae_max_request_bytes: usize,
+    /// Largest accepted export.zip upload in bytes (default 4 GiB).
+    pub max_import_bytes: u64,
 }
+
+/// Default for `HEALTHVIBE_MAX_IMPORT_BYTES`: 4 GiB.
+pub const DEFAULT_MAX_IMPORT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 impl Config {
     pub fn from_env() -> Self {
@@ -48,6 +53,11 @@ impl Config {
             hae_max_request_bytes: get("HEALTHVIBE_HAE_MAX_REQUEST_BYTES", "268435456")
                 .parse()
                 .unwrap_or(256 * 1024 * 1024),
+            max_import_bytes: std::env::var("HEALTHVIBE_MAX_IMPORT_BYTES")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .filter(|&n: &u64| n > 0)
+                .unwrap_or(DEFAULT_MAX_IMPORT_BYTES),
         }
     }
 

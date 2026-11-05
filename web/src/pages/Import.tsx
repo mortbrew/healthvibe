@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, explain } from "../api";
+import { api, ApiError, explain } from "../api";
 import { Link } from "../router";
 
 type Job = {
@@ -38,7 +38,11 @@ export default function Import() {
     xhr.onload = () => {
       setProgress(null);
       if (xhr.status === 200) load();
-      else setErr(explain({ code: JSON.parse(xhr.responseText || "{}").error ?? "upload_failed" }));
+      else {
+        let code = xhr.status === 413 ? "upload_too_large" : "upload_failed";
+        try { code = JSON.parse(xhr.responseText || "{}").error ?? code; } catch { /* not JSON, e.g. from a proxy */ }
+        setErr(explain(new ApiError(xhr.status, code)));
+      }
     };
     xhr.onerror = () => {
       setProgress(null);
