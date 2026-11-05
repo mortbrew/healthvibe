@@ -14,7 +14,7 @@ use crate::api::{bad, ApiError, ApiResult, User};
 use crate::AppState;
 use axum::{
     body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, FromRequestParts, State},
+    extract::{DefaultBodyLimit, FromRequestParts, State},
     http::{header, request::Parts, HeaderMap, StatusCode},
     routing::{delete, get, post, put},
     Json, Router,
@@ -24,7 +24,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
-    net::SocketAddr,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -80,31 +79,24 @@ fn too_many() -> ApiError {
     ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limited")
 }
 
-/// Client address: the last X-Forwarded-For hop (added by the reverse
-/// proxy, so it can't be forged by the client) or the TCP peer.
-pub(crate) fn client_ip(p: &Parts) -> String {
-    if let Some(ip) = p
-        .headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.rsplit(',').next())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        return ip;
-    }
-    p.extensions
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|c| c.0.ip().to_string())
-        .unwrap_or_else(|| "unknown".into())
-}
-
+/// Client address for rate limiting; see [`crate::client`] for when
+/// forwarding headers are believed.
 pub struct ClientIp(String);
 
-impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+impl FromRequestParts<AppState> for ClientIp {
     type Rejection = std::convert::Infallible;
-    async fn from_request_parts(p: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        Ok(ClientIp(client_ip(p)))
+    async fn from_request_parts(p: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        Ok(ClientIp(crate::client::from_parts(st, p).ip))
+    }
+}
+
+/// Whether this request's `X-Forwarded-Host`/`-Proto` may be believed.
+pub struct Forwarded(bool);
+
+impl FromRequestParts<AppState> for Forwarded {
+    type Rejection = std::convert::Infallible;
+    async fn from_request_parts(p: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        Ok(Forwarded(crate::client::from_parts(st, p).via_trusted_proxy))
     }
 }
 
@@ -152,17 +144,17 @@ impl FromRequestParts<AppState> for Device {
 // ------------------------------------------------------------ web app
 
 /// Address to put in the QR code.
-fn server_url(st: &AppState, h: &HeaderMap) -> (String, bool) {
+/// `X-Forwarded-Host`/`-Proto` count only from a trusted proxy (`fwd`).
+fn server_url(st: &AppState, h: &HeaderMap, fwd: bool) -> (String, bool) {
     if let Some(u) = &st.config.public_url {
         return (u.clone(), true);
     }
-    let host = h
-        .get("x-forwarded-host")
+    let xf = |n: &str| if fwd { h.get(n) } else { None };
+    let host = xf("x-forwarded-host")
         .or(h.get(header::HOST))
         .and_then(|v| v.to_str().ok())
         .unwrap_or("localhost:8000");
-    let scheme = h
-        .get("x-forwarded-proto")
+    let scheme = xf("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
         .unwrap_or(if st.config.allow_http {
             "http"
@@ -172,10 +164,15 @@ fn server_url(st: &AppState, h: &HeaderMap) -> (String, bool) {
     (format!("{scheme}://{host}"), false)
 }
 
-async fn get_sync(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+async fn get_sync(
+    State(st): State<AppState>,
+    User(u): User,
+    Forwarded(fwd): Forwarded,
+    h: HeaderMap,
+) -> ApiResult {
     let s = sc::settings(&st.db, u.id).await?;
     let device = sc::token_info(&st.db, u.id).await?;
-    let (server, public_url_set) = server_url(&st, &h);
+    let (server, public_url_set) = server_url(&st, &h, fwd);
     Ok(Json(json!({
         "metrics": sc::METRICS,
         "configured": s.configured,
@@ -228,12 +225,17 @@ fn pct(s: &str) -> String {
     o
 }
 
-async fn setup_code(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+async fn setup_code(
+    State(st): State<AppState>,
+    User(u): User,
+    Forwarded(fwd): Forwarded,
+    h: HeaderMap,
+) -> ApiResult {
     if !sc::settings(&st.db, u.id).await?.configured {
         return Err(ApiError(StatusCode::CONFLICT, "choose_metrics_first"));
     }
     let (code, expires_at) = sc::new_setup_code(&st.db, u.id).await?;
-    let (server, public_url_set) = server_url(&st, &h);
+    let (server, public_url_set) = server_url(&st, &h, fwd);
     let link = format!("healthvibe://setup?server={}&code={}", pct(&server), code);
     Ok(Json(
         json!({ "code": code, "expires_at": expires_at, "server": server,
@@ -323,18 +325,23 @@ use healthvibe_core::hae;
 
 const HAE_UPLOADS_PER_HOUR: u32 = 2000;
 
-fn hae_url(st: &AppState, h: &HeaderMap) -> (String, bool) {
-    let (server, set) = server_url(st, h);
+fn hae_url(st: &AppState, h: &HeaderMap, fwd: bool) -> (String, bool) {
+    let (server, set) = server_url(st, h, fwd);
     (
         format!("{}{}", server.trim_end_matches('/'), hae::PATH),
         set,
     )
 }
 
-async fn hae_info(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+async fn hae_info(
+    State(st): State<AppState>,
+    User(u): User,
+    Forwarded(fwd): Forwarded,
+    h: HeaderMap,
+) -> ApiResult {
     let device = sc::token_info(&st.db, u.id).await?;
     let received = hae::received(&st.db, u.id).await?;
-    let (url, public_url_set) = hae_url(&st, &h);
+    let (url, public_url_set) = hae_url(&st, &h, fwd);
     Ok(Json(json!({
         "url": url,
         "public_url_set": public_url_set,
@@ -347,9 +354,14 @@ async fn hae_info(State(st): State<AppState>, User(u): User, h: HeaderMap) -> Ap
 }
 
 /// Create a new token (replaces any earlier one). Shown once.
-async fn hae_token(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+async fn hae_token(
+    State(st): State<AppState>,
+    User(u): User,
+    Forwarded(fwd): Forwarded,
+    h: HeaderMap,
+) -> ApiResult {
     let token = sc::new_token(&st.db, u.id, hae::DEVICE).await?;
-    let (url, public_url_set) = hae_url(&st, &h);
+    let (url, public_url_set) = hae_url(&st, &h, fwd);
     tracing::info!(user = u.id, "health auto export token created");
     Ok(Json(json!({
         "token": token,
@@ -414,7 +426,12 @@ async fn hae_ingest(
 
 const HANDOFFS_PER_10_MIN: u32 = 10;
 
-async fn handoff_create(State(st): State<AppState>, User(u): User, h: HeaderMap) -> ApiResult {
+async fn handoff_create(
+    State(st): State<AppState>,
+    User(u): User,
+    Forwarded(fwd): Forwarded,
+    h: HeaderMap,
+) -> ApiResult {
     if !allow(
         format!("handoff:{}", u.id),
         HANDOFFS_PER_10_MIN,
@@ -423,7 +440,7 @@ async fn handoff_create(State(st): State<AppState>, User(u): User, h: HeaderMap)
         return Err(too_many());
     }
     let n = healthvibe_core::handoff::create(&st.db, u.id).await?;
-    let (server, public_url_set) = server_url(&st, &h);
+    let (server, public_url_set) = server_url(&st, &h, fwd);
     let link = format!("{}/h/{}", server.trim_end_matches('/'), n.code);
     Ok(Json(json!({
         "id": n.id, "link": link, "expires_at": n.expires_at, "public_url_set": public_url_set,
@@ -448,12 +465,12 @@ struct HandoffIn {
 
 async fn handoff_claim(
     State(st): State<AppState>,
-    ClientIp(ip): ClientIp,
+    client: crate::client::Client,
     h: HeaderMap,
     body: Bytes,
 ) -> ApiResult<([(header::HeaderName, &'static str); 1], Json<Value>)> {
     if !allow(
-        format!("handoff-claim:{ip}"),
+        format!("handoff-claim:{}", client.ip),
         CLAIMS_PER_10_MIN,
         Duration::from_secs(600),
     ) {
@@ -467,7 +484,7 @@ async fn handoff_claim(
                 user = uid,
                 "phone handoff opened; new health auto export token"
             );
-            let (url, public_url_set) = hae_url(&st, &h);
+            let (url, public_url_set) = hae_url(&st, &h, client.via_trusted_proxy);
             Ok((
                 [(header::CACHE_CONTROL, "no-store")],
                 Json(json!({

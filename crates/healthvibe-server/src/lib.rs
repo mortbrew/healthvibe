@@ -1,6 +1,7 @@
 //! healthvibe-server: the Axum application.
 
 mod api;
+pub mod client;
 mod sync;
 
 use axum::{

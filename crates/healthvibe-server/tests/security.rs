@@ -200,3 +200,37 @@ async fn security_headers_on_api_and_spa() {
     assert_eq!(res.headers()[header::STRICT_TRANSPORT_SECURITY], "max-age=31536000");
     let _ = std::fs::remove_dir_all(&web);
 }
+
+async fn hae_url_from(app: &Router, cookie: &str, peer: &str) -> String {
+    let mut req = Request::builder()
+        .uri("/api/v1/sync/hae")
+        .header(header::COOKIE, cookie)
+        .header(header::HOST, "direct.example:8000")
+        .header("x-forwarded-host", "spoofed.example")
+        .header("x-forwarded-proto", "http")
+        .body(Body::empty())
+        .unwrap();
+    req.extensions_mut().insert(axum::extract::ConnectInfo(
+        peer.parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), 200);
+    let b = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let v: Value = serde_json::from_slice(&b).unwrap();
+    v["url"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn forwarded_host_only_believed_from_trusted_proxies() {
+    let (app, _db, _) = app_with(|c| {
+        c.public_url = None;
+        c.allow_http = false;
+        c.trusted_proxies = healthvibe_core::config::parse_cidrs("172.16.0.0/12").unwrap();
+    })
+    .await;
+    let cookie = setup(&app).await;
+    let untrusted = hae_url_from(&app, &cookie, "203.0.113.5:4000").await;
+    assert!(untrusted.starts_with("https://direct.example:8000/"), "{untrusted}");
+    let trusted = hae_url_from(&app, &cookie, "172.18.0.2:4000").await;
+    assert!(trusted.starts_with("http://spoofed.example/"), "{trusted}");
+}
