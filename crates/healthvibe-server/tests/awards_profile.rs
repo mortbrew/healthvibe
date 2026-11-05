@@ -374,6 +374,21 @@ async fn privacy_export_delete_and_sessions() {
     assert_eq!(csv.lines().count(), 2);
     assert!(csv.contains(",10,") && !csv.contains(",20,"));
 
+    for uid in [1, 2] {
+        sqlx::query(
+            "INSERT INTO workouts (user_id, channel, source, start_utc, end_utc, activity_type)
+             VALUES (?, 'export_xml', 'Synthetic', '2026-01-01T10:00:00Z', '2026-01-01T10:30:00Z', 'HKWorkoutActivityTypeRunning')",
+        )
+        .bind(uid)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO ingest_raw (user_id, received_at, body, status) VALUES (?, '2026-01-01T00:00:00Z', x'00', 'failed')")
+            .bind(uid)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
     assert_eq!(
         call(
             &app,
@@ -403,6 +418,13 @@ async fn privacy_export_delete_and_sessions() {
         .await
         .unwrap();
     assert_eq!(left, vec![2]);
+    for table in ["workouts", "ingest_raw"] {
+        let left: Vec<i64> = sqlx::query_scalar(&format!("SELECT user_id FROM {table}"))
+            .fetch_all(&db)
+            .await
+            .unwrap();
+        assert_eq!(left, vec![2], "{table}");
+    }
 
     let (_, _, sam2) = call(
         &app,

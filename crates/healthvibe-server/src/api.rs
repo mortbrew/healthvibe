@@ -876,7 +876,8 @@ struct Confirm {
     confirm: String,
 }
 
-/// Delete all of this user's health data (readings, goals, imports state, awards). Keeps the account.
+/// Delete all of this user's health data (readings, workouts, goals, raw uploads awaiting
+/// parse, sync cursors, awards). Keeps the account, profile and devices.
 async fn delete_data(
     State(st): State<AppState>,
     User(u): User,
@@ -888,7 +889,10 @@ async fn delete_data(
     let mut tx = st.db.begin().await?;
     for t in [
         "readings",
+        "workouts",
         "activity_goals",
+        "ingest_raw",
+        "sync_cursors",
         "user_awards",
         "awards_state",
         "pinned_metrics",
