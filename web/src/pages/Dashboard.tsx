@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Activity, api, Body, Dashboard as Dash, explain, Heart, Metric, SeriesData, Sleep, Widget } from "../api";
-import { Bars, Hypnogram, Lines, Rings, STAGES } from "../components/charts";
+import { Bars, Hypnogram, Lines, Rings, sleepLegendRows } from "../components/charts";
 import { Link } from "../router";
 import { GoalFrom, ofGoal } from "../health/rings";
 
@@ -422,17 +422,14 @@ function SleepCard({ s }: { s: Sleep }) {
         <>
           <Hypnogram segments={s.last_night} />
           <div className="legend">
-            {STAGES.map((st) => {
-              const key = { Awake: "awake_min", AsleepREM: "rem_min", AsleepCore: "core_min", AsleepDeep: "deep_min" }[st.key] as keyof typeof last;
-              return (
-                <span key={st.key}>
-                  <i style={{ background: st.color }} />
-                  {st.label} {hm(Number(last[key]))}
-                </span>
-              );
-            })}
+            {sleepLegendRows(last).map((st) => (
+              <span key={st.key}>
+                <i style={{ background: st.color }} />
+                {st.label} {hm(st.minutes)}
+              </span>
+            ))}
           </div>
-          <p className="muted foot">Samples ending {last.date} from {last.source || "unknown source"}{last.in_bed_min > 0 ? ` · in bed ${hm(last.in_bed_min)}` : ""}</p>
+          <p className="muted foot">Samples ending {last.date} from {last.source || "unknown source"}</p>
         </>
       )}
     </section>

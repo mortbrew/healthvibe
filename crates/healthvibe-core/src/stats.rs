@@ -1091,6 +1091,45 @@ mod tests {
         assert_eq!(s.last_night[0].stage, "InBed");
     }
 
+    /// TIME ASLEEP header must equal rem+core+deep+unspecified; Awake/InBed are
+    /// listed separately and never counted as asleep (Apple Sleep Analysis).
+    #[tokio::test]
+    async fn sleep_asleep_matches_listed_asleep_stages() {
+        let db = crate::db::open_memory().await.unwrap();
+        let v = |s: &str| format!("HKCategoryValueSleepAnalysis{s}");
+        for (st, s, e) in [
+            ("InBed", "2024-03-01 22:00:00", "2024-03-02 07:00:00"),
+            ("Awake", "2024-03-02 06:30:00", "2024-03-02 06:50:00"),
+            ("AsleepCore", "2024-03-01 22:20:00", "2024-03-02 01:00:00"),
+            ("AsleepDeep", "2024-03-02 01:00:00", "2024-03-02 02:00:00"),
+            ("AsleepREM", "2024-03-02 02:00:00", "2024-03-02 03:00:00"),
+            (
+                "AsleepUnspecified",
+                "2024-03-02 03:00:00",
+                "2024-03-02 04:00:00",
+            ),
+            ("AsleepCore", "2024-03-02 04:00:00", "2024-03-02 06:30:00"),
+        ] {
+            add(&db, 1, SLEEP, &v(st), s, e, "Watch").await;
+        }
+        let s = sleep(&db, 1, "2024-03-02", 7).await.unwrap();
+        let n = s
+            .nights
+            .iter()
+            .find(|n| n.date == "2024-03-02")
+            .expect("night ending 2024-03-02");
+        let listed_asleep = n.rem_min + n.core_min + n.deep_min + n.unspecified_min;
+        assert_eq!(n.asleep_min.round(), listed_asleep.round());
+        assert!(n.awake_min > 0.0, "{n:?}");
+        assert!(n.in_bed_min > 0.0, "{n:?}");
+        assert!(n.unspecified_min > 0.0, "{n:?}");
+        // Awake and In Bed are shown but never counted toward TIME ASLEEP.
+        assert_ne!(
+            n.asleep_min.round(),
+            (listed_asleep + n.awake_min + n.in_bed_min).round()
+        );
+    }
+
     #[tokio::test]
     async fn sleep_and_body() {
         let db = seeded().await;

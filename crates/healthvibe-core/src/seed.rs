@@ -130,6 +130,78 @@ async fn put_reading(
     Ok(())
 }
 
+/// One Watch-style night ending the morning of `end_day`: Awake / REM / Core / Deep.
+/// Segments stay in the overnight window (no daytime samples). Returns rows inserted.
+async fn put_sleep_night(db: &SqlitePool, user_id: i64, end_day: NaiveDate) -> anyhow::Result<u64> {
+    let prev = end_day - Duration::days(1);
+    // (stage, day, start_h, start_m, end_h, end_m) — overnight via end < start on `prev`.
+    let segs: &[(&str, NaiveDate, u32, u32, u32, u32)] = &[
+        ("HKCategoryValueSleepAnalysisAwake", prev, 22, 0, 22, 18),
+        (
+            "HKCategoryValueSleepAnalysisAsleepCore",
+            prev,
+            22,
+            18,
+            23,
+            40,
+        ),
+        (
+            "HKCategoryValueSleepAnalysisAsleepDeep",
+            prev,
+            23,
+            40,
+            0,
+            50,
+        ),
+        (
+            "HKCategoryValueSleepAnalysisAsleepCore",
+            end_day,
+            0,
+            50,
+            2,
+            10,
+        ),
+        (
+            "HKCategoryValueSleepAnalysisAsleepREM",
+            end_day,
+            2,
+            10,
+            2,
+            55,
+        ),
+        ("HKCategoryValueSleepAnalysisAwake", end_day, 2, 55, 3, 5),
+        (
+            "HKCategoryValueSleepAnalysisAsleepCore",
+            end_day,
+            3,
+            5,
+            4,
+            40,
+        ),
+        (
+            "HKCategoryValueSleepAnalysisAsleepDeep",
+            end_day,
+            4,
+            40,
+            5,
+            25,
+        ),
+        (
+            "HKCategoryValueSleepAnalysisAsleepREM",
+            end_day,
+            5,
+            25,
+            6,
+            35,
+        ),
+        ("HKCategoryValueSleepAnalysisAwake", end_day, 6, 35, 6, 50),
+    ];
+    for (stage, day, sh, sm, eh, em) in segs {
+        put_reading(db, user_id, SLEEP, stage, "", *day, *sh, *sm, *eh, *em).await?;
+    }
+    Ok(segs.len() as u64)
+}
+
 /// Fill `days` of synthetic data ending on `opts.end` (or today). Idempotent
 /// for the demo channel: prior demo rows for the user are cleared first.
 pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedReport> {
@@ -266,42 +338,9 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         .await?;
         report.readings += 8;
 
-        // Overnight sleep ending this morning: previous evening → morning.
-        let prev = d - Duration::days(1);
-        put_reading(
-            db,
-            opts.user_id,
-            SLEEP,
-            "HKCategoryValueSleepAnalysisAsleepCore",
-            "",
-            prev,
-            22,
-            30,
-            6,
-            30,
-        )
-        .await?;
-        // Fix: put_reading uses `day` for start; overnight spanning needs care.
-        // Re-insert with explicit times via raw SQL for sleep.
-        report.readings += 1;
-
-        // Extra daytime sleep sample every 3rd day at 13:00 (stored like any other).
-        if d.ordinal().is_multiple_of(3) {
-            put_reading(
-                db,
-                opts.user_id,
-                SLEEP,
-                "HKCategoryValueSleepAnalysisAsleepUnspecified",
-                "",
-                d,
-                13,
-                0,
-                14,
-                0,
-            )
-            .await?;
-            report.readings += 1;
-        }
+        // Realistic overnight sleep ending this morning (Watch-style stages).
+        // No daytime nap samples — seed shows only a night window.
+        report.readings += put_sleep_night(db, opts.user_id, d).await?;
 
         // Goals
         sqlx::query(
@@ -365,10 +404,6 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         d += Duration::days(1);
     }
 
-    // Fix overnight sleep: put_reading with end before start uses next day for
-    // end, but start day was `prev` incorrectly written as sleep on `prev` with
-    // end 06:30 same calendar trick. Verify: start_h=22 end_h=6 → end_day=prev+1=d. Good.
-
     Ok(report)
 }
 
@@ -397,18 +432,57 @@ mod tests {
                 .unwrap();
         assert_eq!(channels, vec![DEMO.to_string()]);
         let daytime: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM readings WHERE user_id = 1 AND type = ? AND local_start LIKE '% 13:%'",
+            "SELECT COUNT(*) FROM readings WHERE user_id = 1 AND type = ? AND substr(local_start, 12, 2) BETWEEN '10' AND '20'",
         )
         .bind(SLEEP)
         .fetch_one(&db)
         .await
         .unwrap();
-        assert!(daytime >= 1);
+        assert_eq!(daytime, 0, "demo seed must not invent daytime sleep");
         let w: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workouts WHERE user_id = 1")
             .fetch_one(&db)
             .await
             .unwrap();
         assert_eq!(w, a.workouts as i64);
+    }
+
+    #[tokio::test]
+    async fn seed_sleep_is_realistic_four_stage_night() {
+        let db = crate::db::open_memory().await.unwrap();
+        seed_demo(
+            &db,
+            SeedOpts {
+                user_id: 1,
+                days: 3,
+                end: Some("2024-06-07".into()),
+                rng_seed: 42,
+            },
+        )
+        .await
+        .unwrap();
+        let s = crate::stats::sleep(&db, 1, "2024-06-07", 3).await.unwrap();
+        assert!(!s.nights.is_empty());
+        let n = s.nights.last().unwrap();
+        assert!(n.core_min > 0.0, "core {n:?}");
+        assert!(n.deep_min > 0.0, "deep {n:?}");
+        assert!(n.rem_min > 0.0, "rem {n:?}");
+        assert!(n.awake_min > 0.0, "awake {n:?}");
+        assert_eq!(n.unspecified_min, 0.0);
+        assert_eq!(
+            n.asleep_min.round(),
+            (n.rem_min + n.core_min + n.deep_min + n.unspecified_min).round()
+        );
+        for seg in &s.last_night {
+            if seg.end.starts_with("2024-06-07") {
+                let hour: u32 = seg.end[11..13].parse().unwrap();
+                assert!(hour < 12, "daytime end on night date: {seg:?}");
+            }
+        }
+        let stages: std::collections::HashSet<_> =
+            s.last_night.iter().map(|g| g.stage.as_str()).collect();
+        for need in ["Awake", "AsleepREM", "AsleepCore", "AsleepDeep"] {
+            assert!(stages.contains(need), "missing {need} in {stages:?}");
+        }
     }
 
     #[tokio::test]

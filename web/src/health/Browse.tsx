@@ -1,7 +1,7 @@
 // Browse: search, categories, metric lists, metric detail, all records.
 import { useEffect, useState } from "react";
 import { api, Sleep } from "../api";
-import { Hypnogram, STAGES } from "../components/charts";
+import { Hypnogram, sleepLegendRows } from "../components/charts";
 import { Link } from "../router";
 import { conv, useHealth } from "./ctx";
 import { BrowseMetric, CATEGORIES, cat, CatIcon, Chevron, fmtNum, hm, SLEEP, unitLabel, useApi, useBrowse, when, DEFAULT_PINNED } from "./meta";
@@ -147,11 +147,9 @@ function SleepDayCard({ anchor, offset, setOffset, color }: { anchor: string | n
       {s.data?.last_night?.length ? <Hypnogram segments={s.data.last_night} /> : <p className="muted">No sleep samples for this night.</p>}
       {night && (
         <div className="stage-totals">
-          {STAGES.map((st) => {
-            const key = { Awake: "awake_min", AsleepREM: "rem_min", AsleepCore: "core_min", AsleepDeep: "deep_min" }[st.key] as keyof NonNullable<typeof night>;
-            const v = Number(night[key] ?? 0);
-            return <div key={st.key}><i style={{ background: st.color }} /><span>{st.label}</span><b className="num">{hm(v)}</b></div>;
-          })}
+          {sleepLegendRows(night).map((st) => (
+            <div key={st.key}><i style={{ background: st.color }} /><span>{st.label}</span><b className="num">{hm(st.minutes)}</b></div>
+          ))}
         </div>
       )}
       <Pager offset={offset} setOffset={setOffset} />

@@ -164,6 +164,50 @@ export const STAGES = [
   { key: "AsleepDeep", label: "Deep", color: "var(--deep)" },
 ];
 
+/** Legend rows for a night: always Awake/REM/Core/Deep; Unspecified and In Bed when present.
+ *  Asleep total = rem + core + deep + unspecified (Awake / In Bed excluded). */
+export type NightMins = {
+  awake_min: number;
+  rem_min: number;
+  core_min: number;
+  deep_min: number;
+  unspecified_min: number;
+  in_bed_min: number;
+  asleep_min: number;
+};
+
+export function sleepLegendRows(n: NightMins): { key: string; label: string; color: string; minutes: number; asleep: boolean }[] {
+  const rows = [
+    { key: "Awake", label: "Awake", color: "var(--awake)", minutes: n.awake_min, asleep: false },
+    { key: "AsleepREM", label: "REM", color: "var(--rem)", minutes: n.rem_min, asleep: true },
+    { key: "AsleepCore", label: "Core", color: "var(--core)", minutes: n.core_min, asleep: true },
+    { key: "AsleepDeep", label: "Deep", color: "var(--deep)", minutes: n.deep_min, asleep: true },
+  ];
+  if (n.unspecified_min > 0) {
+    rows.push({
+      key: "AsleepUnspecified",
+      label: "Asleep Unspecified",
+      color: "var(--unspecified)",
+      minutes: n.unspecified_min,
+      asleep: true,
+    });
+  }
+  if (n.in_bed_min > 0) {
+    rows.push({
+      key: "InBed",
+      label: "In Bed",
+      color: "var(--inbed)",
+      minutes: n.in_bed_min,
+      asleep: false,
+    });
+  }
+  return rows;
+}
+
+export function asleepFromLegend(n: NightMins): number {
+  return n.rem_min + n.core_min + n.deep_min + n.unspecified_min;
+}
+
 /** Hypnogram: stages as rows over the night, Sleep Stats style. */
 export function Hypnogram(props: { segments: { stage: string; start: string; end: string }[] }) {
   const H = 150;
@@ -190,7 +234,10 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
       ))}
       {segs.map((s, i) => {
         const r = row(s.stage);
-        const color = STAGES[r]?.color ?? "var(--core)";
+        const color =
+          s.stage === "AsleepUnspecified"
+            ? "var(--unspecified)"
+            : (STAGES[r]?.color ?? "var(--core)");
         return (
           <rect key={i} x={x(t(s.start))} y={pad.t + rowH * r + 3} width={Math.max(1.5, x(t(s.end)) - x(t(s.start)))} height={rowH - 6} rx={3} fill={color} />
         );
