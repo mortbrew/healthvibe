@@ -13,6 +13,7 @@ tokio.workspace = true
 tracing.workspace = true
 argon2.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 hex.workspace = true
 quick-xml.workspace = true
 rand.workspace = true

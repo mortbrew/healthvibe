@@ -21,6 +21,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["fs"] }
 argon2 = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
 hex = "0.4"
 quick-xml = "0.37"
 rand = "0.8"
@@ -35,3 +36,4 @@ healthvibe-themes = { path = "crates/healthvibe-themes" }
 lto = "thin"
 codegen-units = 1
 strip = true
+

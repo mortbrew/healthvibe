@@ -107,6 +107,10 @@ export function DetailsPage() {
         <label className="field">Sex<select value={p.sex ?? ""} onChange={(e) => setP({ ...p, sex: e.target.value || null })}><option value="">Not set</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
         <label className="field">Height (cm)<input type="number" min={30} max={272} value={p.height_cm ?? ""} onChange={(e) => setP({ ...p, height_cm: num(e.target.value) })} /></label>
         <label className="field check"><input type="checkbox" checked={!!p.wheelchair} onChange={(e) => setP({ ...p, wheelchair: e.target.checked })} />Wheelchair user</label>
+        <label className="field">Time Zone<input type="text" list="tz-list" placeholder="America/New_York" value={p.timezone ?? ""} onChange={(e) => setP({ ...p, timezone: e.target.value || null })} autoComplete="off" />
+          <datalist id="tz-list">{["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Phoenix","America/Toronto","Europe/London","Europe/Paris","Europe/Berlin","Asia/Tokyo","Asia/Shanghai","Australia/Sydney","Pacific/Auckland","UTC"].map((z) => <option key={z} value={z} />)}</datalist>
+        </label>
+        <p className="muted small">IANA name used for demo seed &quot;today&quot;. Imported Health dates are never rewritten.</p>
       </section>
       <div className="actions"><button className="pill green" onClick={() => save(p)}>Save</button>{msg && <span className="muted">{msg}</span>}</div>
     </Sub>
@@ -171,6 +175,22 @@ export const UsersPage = () => <Sub title="Users" wide><Admin /></Sub>;
 
 export function useProfile(user: User | null) {
   const [p, setP] = useState<Profile | null>(null);
-  useEffect(() => { if (user) api<{ profile: Profile }>("/profile").then((r) => setP(r.profile), () => setP(EMPTY_PROFILE)); }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!user) return;
+    api<{ profile: Profile }>("/profile").then(async (r) => {
+      let prof = r.profile;
+      // First login / empty profile: adopt the browser's IANA zone once.
+      if (!prof.timezone) {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (tz) {
+          try {
+            const saved = await api<{ profile: Profile }>("/profile", { method: "PUT", body: { ...prof, timezone: tz } });
+            prof = saved.profile;
+          } catch { /* keep unloaded timezone; Account can set it */ }
+        }
+      }
+      setP(prof);
+    }, () => setP(EMPTY_PROFILE));
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return [p, setP] as const;
 }

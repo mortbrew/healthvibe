@@ -26,10 +26,8 @@ pub struct SeedOpts {
     pub user_id: i64,
     pub days: i64,
     /// Inclusive end date (local calendar) `YYYY-MM-DD`. Defaults to today
-    /// in the process local timezone. The app has no per-user time zone setting;
-    /// readings carry a precomputed `local_start` from import, and the UI's
-    /// "today" is the browser calendar. Seed matches process-local today so
-    /// evenings do not spill into "tomorrow" the way UTC would.
+    /// in the user's profile IANA time zone (falling back to process-local).
+    /// Imported Health `local_*` dates are never rewritten from the profile TZ.
     pub end: Option<String>,
     pub rng_seed: u64,
 }
@@ -53,13 +51,10 @@ pub struct SeedReport {
     pub days: i64,
 }
 
-fn parse_end(end: &Option<String>) -> anyhow::Result<NaiveDate> {
+fn parse_end(end: &Option<String>, timezone: Option<&str>) -> anyhow::Result<NaiveDate> {
     match end {
         Some(s) => Ok(NaiveDate::parse_from_str(s, "%Y-%m-%d")?),
-        // No stored per-user TZ: use process-local today (not UTC). The UI's
-        // "today" is the browser calendar; UTC made evening (US) seeds land on
-        // tomorrow in the dashboard. See SeedOpts::end docs.
-        None => Ok(chrono::Local::now().date_naive()),
+        None => Ok(crate::profile::today_in(timezone)),
     }
 }
 
@@ -138,7 +133,11 @@ async fn put_reading(
 /// Fill `days` of synthetic data ending on `opts.end` (or today). Idempotent
 /// for the demo channel: prior demo rows for the user are cleared first.
 pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedReport> {
-    let end = parse_end(&opts.end)?;
+    let tz = crate::profile::get(db, opts.user_id)
+        .await
+        .ok()
+        .and_then(|p| p.timezone);
+    let end = parse_end(&opts.end, tz.as_deref())?;
     let start = end - Duration::days(opts.days - 1);
     let mut rng = StdRng::seed_from_u64(opts.rng_seed);
     clear_demo(db, opts.user_id).await?;
@@ -413,10 +412,10 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Default end is process-local today (there is no per-user time zone).
+    /// Default end is today in the profile time zone (else process-local).
     async fn seed_default_end_is_local_today_not_past() {
         let db = crate::db::open_memory().await.unwrap();
-        let today = chrono::Local::now().date_naive();
+        let today = crate::profile::today_in(None);
         let report = seed_demo(
             &db,
             SeedOpts {
@@ -452,5 +451,39 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(after, 0);
+    }
+
+    #[tokio::test]
+    async fn seed_uses_profile_timezone() {
+        let db = crate::db::open_memory().await.unwrap();
+        crate::profile::put(
+            &db,
+            1,
+            &crate::profile::Profile {
+                timezone: Some("UTC".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let today = crate::profile::today_in(Some("UTC"));
+        seed_demo(
+            &db,
+            SeedOpts {
+                user_id: 1,
+                days: 1,
+                end: None,
+                rng_seed: 1,
+            },
+        )
+        .await
+        .unwrap();
+        let max_local: String = sqlx::query_scalar(
+            "SELECT max(substr(local_end, 1, 10)) FROM readings WHERE user_id = 1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(max_local, today.format("%Y-%m-%d").to_string());
     }
 }

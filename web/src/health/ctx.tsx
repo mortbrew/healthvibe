@@ -8,8 +8,10 @@ export type Profile = {
   display_name: string | null; birth_date: string | null; sex: string | null; height_cm: number | null;
   wheelchair: boolean | null; avatar: Partial<AvatarCfg> | null;
   units: Partial<Units> | null;
+  /** IANA time zone, e.g. America/New_York. */
+  timezone: string | null;
 };
-export const EMPTY_PROFILE: Profile = { display_name: null, birth_date: null, sex: null, height_cm: null, wheelchair: null, avatar: null, units: null };
+export const EMPTY_PROFILE: Profile = { display_name: null, birth_date: null, sex: null, height_cm: null, wheelchair: null, avatar: null, units: null, timezone: null };
 
 export type Ctx = { user: User; onUser: (u: User) => void; profile: Profile; setProfile: (p: Profile) => void; avatar: AvatarCfg; name: string; units: Units; logout: () => void };
 export const HealthCtx = createContext<Ctx>(null as unknown as Ctx);

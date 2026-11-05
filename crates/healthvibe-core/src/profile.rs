@@ -1,4 +1,4 @@
-//! Optional per-user profile: details, avatar config, units.
+//! Optional per-user profile: details, avatar config, units, IANA time zone.
 //! Ring goals are never set here: they come only from Apple ActivitySummary data.
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,9 @@ pub struct Profile {
     pub avatar: Option<Value>,
     /// {distance: mi|km, weight: lb|kg, energy: cal|kj, temp: f|c}
     pub units: Option<Value>,
+    /// IANA time zone, e.g. "America/New_York". Used by seed-demo for "today";
+    /// imported Health local dates are never rewritten from this.
+    pub timezone: Option<String>,
 }
 
 type Row = (
@@ -27,12 +30,16 @@ type Row = (
     Option<bool>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 pub async fn get(db: &SqlitePool, uid: i64) -> anyhow::Result<Profile> {
     let r: Option<Row> = sqlx::query_as(
-        "SELECT display_name, birth_date, sex, height_cm, wheelchair, avatar, units FROM profiles WHERE user_id = ?",
-    ).bind(uid).fetch_optional(db).await?;
+        "SELECT display_name, birth_date, sex, height_cm, wheelchair, avatar, units, timezone FROM profiles WHERE user_id = ?",
+    )
+    .bind(uid)
+    .fetch_optional(db)
+    .await?;
     let Some(r) = r else {
         return Ok(Profile::default());
     };
@@ -45,6 +52,7 @@ pub async fn get(db: &SqlitePool, uid: i64) -> anyhow::Result<Profile> {
         wheelchair: r.4,
         avatar: json(r.5),
         units: json(r.6),
+        timezone: r.7,
     })
 }
 
@@ -54,6 +62,7 @@ pub fn validate(mut p: Profile) -> Result<Profile, &'static str> {
     p.display_name = trim(p.display_name);
     p.birth_date = trim(p.birth_date);
     p.sex = trim(p.sex);
+    p.timezone = trim(p.timezone);
     if p.display_name
         .as_ref()
         .is_some_and(|n| n.chars().count() > 60)
@@ -85,6 +94,11 @@ pub fn validate(mut p: Profile) -> Result<Profile, &'static str> {
             return Err("invalid_profile");
         }
     }
+    if let Some(tz) = &p.timezone {
+        if tz.parse::<chrono_tz::Tz>().is_err() || tz.len() > 64 {
+            return Err("invalid_timezone");
+        }
+    }
     Ok(p)
 }
 
@@ -101,15 +115,33 @@ impl YearOk for chrono::NaiveDate {
 pub async fn put(db: &SqlitePool, uid: i64, p: &Profile) -> anyhow::Result<()> {
     let s = |v: &Option<Value>| v.as_ref().map(|v| v.to_string());
     sqlx::query(
-        "INSERT INTO profiles (user_id, display_name, birth_date, sex, height_cm, wheelchair, avatar, units)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO profiles (user_id, display_name, birth_date, sex, height_cm, wheelchair, avatar, units, timezone)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET display_name = excluded.display_name, birth_date = excluded.birth_date, sex = excluded.sex,
-           height_cm = excluded.height_cm, wheelchair = excluded.wheelchair, avatar = excluded.avatar, units = excluded.units",
+           height_cm = excluded.height_cm, wheelchair = excluded.wheelchair, avatar = excluded.avatar, units = excluded.units,
+           timezone = excluded.timezone",
     )
-    .bind(uid).bind(&p.display_name).bind(&p.birth_date).bind(&p.sex).bind(p.height_cm).bind(p.wheelchair)
-    .bind(s(&p.avatar)).bind(s(&p.units))
-    .execute(db).await?;
+    .bind(uid)
+    .bind(&p.display_name)
+    .bind(&p.birth_date)
+    .bind(&p.sex)
+    .bind(p.height_cm)
+    .bind(p.wheelchair)
+    .bind(s(&p.avatar))
+    .bind(s(&p.units))
+    .bind(&p.timezone)
+    .execute(db)
+    .await?;
     Ok(())
+}
+
+/// Today's calendar date in the given IANA zone, or local process date if unset/invalid.
+pub fn today_in(timezone: Option<&str>) -> chrono::NaiveDate {
+    use chrono::{Local, Utc};
+    if let Some(tz) = timezone.and_then(|s| s.parse::<chrono_tz::Tz>().ok()) {
+        return Utc::now().with_timezone(&tz).date_naive();
+    }
+    Local::now().date_naive()
 }
 
 #[cfg(test)]
@@ -147,5 +179,23 @@ mod tests {
             ..Default::default()
         })
         .is_err());
+        assert!(validate(Profile {
+            timezone: Some("America/New_York".into()),
+            ..Default::default()
+        })
+        .is_ok());
+        assert_eq!(
+            validate(Profile {
+                timezone: Some("Not/A_Zone".into()),
+                ..Default::default()
+            }),
+            Err("invalid_timezone")
+        );
+    }
+
+    #[test]
+    fn today_in_known_zone() {
+        let d = today_in(Some("UTC"));
+        assert_eq!(d, chrono::Utc::now().date_naive());
     }
 }
