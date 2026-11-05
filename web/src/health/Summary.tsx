@@ -7,7 +7,7 @@ import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, EN
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
 import { FitRings, GoalFrom, noGoals, ringsOf } from "./rings";
 import { NoGoalsAlert } from "./Goals";
-import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
+import { CalIcon, CheckIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
@@ -46,6 +46,9 @@ export function WorkoutIcon() {
 
 function Pinned({ metrics, activity, edit, setEdit }: { metrics: BrowseMetric[]; activity: Activity["rings"] | null | undefined; edit: boolean; setEdit: (v: boolean) => void }) {
   const [pins, setPins] = useState<string[] | null>(null);
+  const [draft, setDraft] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const drag = useRef<number | null>(null);
   useEffect(() => {
     api<{ pinned: string[] }>("/pinned").then((r) => setPins(r.pinned), () => setPins([]));
   }, []);
@@ -55,9 +58,29 @@ function Pinned({ metrics, activity, edit, setEdit }: { metrics: BrowseMetric[];
     setPins(next);
     await api("/pinned", { method: "PUT", body: { pinned: next } }).catch(() => {});
   };
+  useEffect(() => { if (edit) { setDraft(list.slice()); setQ(""); } }, [edit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openEdit = () => setEdit(true);
+  const done = async () => {
+    await save(draft);
+    setEdit(false);
+  };
+  const removeAt = (i: number) => setDraft((d) => d.filter((_, j) => j !== i));
+  const onDragStart = (i: number) => { drag.current = i; };
+  const onDragOver = (e: React.DragEvent, i: number) => {
+    e.preventDefault();
+    if (drag.current == null || drag.current === i) return;
+    setDraft((d) => {
+      const next = d.slice();
+      const [m] = next.splice(drag.current!, 1);
+      next.splice(i, 0, m);
+      drag.current = i;
+      return next;
+    });
+  };
+  const filteredAdd = metrics.filter((m) => !draft.includes(m.metric) && (!q || m.name.toLowerCase().includes(q.toLowerCase())));
   return (
     <section className="pinned">
-      <div className="sec-head"><h2>Pinned</h2><button className="link" onClick={() => setEdit(true)}>Edit</button></div>
+      <div className="sec-head"><h2>Pinned</h2><button className="link" onClick={openEdit}>Edit</button></div>
       <div className="pingrid">
         <ActivityPinCard r={activity ?? null} />
         {list.map((m) => {
@@ -67,20 +90,58 @@ function Pinned({ metrics, activity, edit, setEdit }: { metrics: BrowseMetric[];
       </div>
       {pins !== null && !list.length && !activity && <p className="muted">Pin metrics from Health to see them here.</p>}
       {edit && (
-        <Sheet title="Edit Pinned" onClose={() => setEdit(false)}>
-          <p className="muted small">Pinned topics appear at the top of Summary. {list.length}/30 pinned.</p>
-          <div className="group">
-            {metrics.map((m) => {
-              const on = list.includes(m.metric);
+        <Sheet
+          title="Edit Pinned List"
+          onClose={() => setEdit(false)}
+          right={
+            <button type="button" className="roundbtn done-check" aria-label="Done" onClick={done}>
+              <CheckIcon />
+            </button>
+          }
+        >
+          <p className="group-title">Pinned</p>
+          <div className="group edit-pinned-list">
+            {draft.map((id, i) => {
+              const bm = metrics.find((x) => x.metric === id);
+              const label = id === "activity" ? "Activity" : (bm?.name ?? id);
               return (
-                <button key={m.metric} className="row" onClick={() => save(on ? list.filter((x) => x !== m.metric) : [...list, m.metric].slice(0, 30))}>
-                  <span className="row-icon"><CatIcon k={m.category} /></span>
-                  <span className="row-label">{m.name}</span>
-                  <span className={on ? "pinmark on" : "pinmark"} aria-label={on ? "Unpin" : "Pin"}>{on ? "−" : "+"}</span>
-                </button>
+                <div
+                  key={id}
+                  className="row edit-pin-row"
+                  draggable
+                  onDragStart={() => onDragStart(i)}
+                  onDragOver={(e) => onDragOver(e, i)}
+                >
+                  <button type="button" className="minus-btn" aria-label={`Remove ${label}`} onClick={() => removeAt(i)}>−</button>
+                  <span className="row-label">{label}</span>
+                  <span className="drag-handle" aria-hidden>≡</span>
+                </div>
               );
             })}
+            {!draft.length && <p className="muted pad">Nothing pinned yet.</p>}
+            <div className="edit-pin-search">
+              <input className="search" type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search metrics to pin" />
+            </div>
           </div>
+          {filteredAdd.length > 0 && (
+            <>
+              <p className="group-title">Add</p>
+              <div className="group">
+                {filteredAdd.map((m) => (
+                  <button
+                    key={m.metric}
+                    type="button"
+                    className="row"
+                    onClick={() => setDraft((d) => d.length >= 30 ? d : [...d, m.metric])}
+                  >
+                    <span className="row-icon"><CatIcon k={m.category} /></span>
+                    <span className="row-label">{m.name}</span>
+                    <span className="pinmark" aria-hidden>+</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </Sheet>
       )}
     </section>

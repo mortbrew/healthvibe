@@ -91,6 +91,7 @@ export type Heart = {
   resting: DayValue[];
   hrv: DayValue[];
 };
+export type SleepSegment = { stage: string; start: string; end: string };
 export type Night = {
   date: string;
   awake_min: number;
@@ -102,6 +103,18 @@ export type Night = {
   in_bed_min: number;
   source: string;
   channel: string;
+  segments?: SleepSegment[];
+};
+export type VitalRange = { min: number; max: number; unit: string | null };
+export type VitalPoint = { start: string; end: string; min: number; max: number };
+export type SleepVitals = {
+  date: string;
+  window_start?: string | null;
+  window_end?: string | null;
+  heart_rate: VitalRange | null;
+  respiratory_rate: VitalRange | null;
+  wrist_temperature: VitalRange | null;
+  heart_rate_series: VitalPoint[];
 };
 export type Workout = {
   id?: number | null;

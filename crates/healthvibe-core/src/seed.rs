@@ -20,6 +20,8 @@ const RHR: &str = "HKQuantityTypeIdentifierRestingHeartRate";
 const HRV: &str = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN";
 const SLEEP: &str = "HKCategoryTypeIdentifierSleepAnalysis";
 const WEIGHT: &str = "HKQuantityTypeIdentifierBodyMass";
+const RESPIRATORY: &str = "HKQuantityTypeIdentifierRespiratoryRate";
+const WRIST_TEMP: &str = "HKQuantityTypeIdentifierAppleSleepingWristTemperature";
 
 #[derive(Debug, Clone)]
 pub struct SeedOpts {
@@ -317,6 +319,7 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
             31,
         )
         .await?;
+        // Daytime HR sample (activity).
         put_reading(
             db,
             opts.user_id,
@@ -336,6 +339,73 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         // No daytime nap samples — seed shows only a night window.
         report.readings += put_sleep_night(db, opts.user_id, d).await?;
 
+        // Overnight vitals overlapping the sleep window (for Comparisons).
+        let prev = d - Duration::days(1);
+        for (h, m) in [
+            (22, 30),
+            (23, 0),
+            (23, 30),
+            (0, 15),
+            (1, 0),
+            (1, 45),
+            (2, 30),
+            (3, 15),
+            (4, 0),
+            (4, 45),
+            (5, 30),
+            (6, 15),
+            (6, 50),
+        ] {
+            let day = if h >= 22 { prev } else { d };
+            let bpm = 52.0 + rng.gen_range(0.0..20.0);
+            put_reading(
+                db,
+                opts.user_id,
+                HR,
+                &format!("{bpm:.0}"),
+                "count/min",
+                day,
+                h,
+                m,
+                h,
+                m.saturating_add(1).min(59),
+            )
+            .await?;
+            report.readings += 1;
+            if m % 30 == 0 {
+                let rr = 10.0 + rng.gen_range(0.0..8.5);
+                put_reading(
+                    db,
+                    opts.user_id,
+                    RESPIRATORY,
+                    &format!("{rr:.1}"),
+                    "count/min",
+                    day,
+                    h,
+                    m,
+                    h,
+                    m.saturating_add(1).min(59),
+                )
+                .await?;
+                report.readings += 1;
+            }
+        }
+        // Absolute wrist temperature (°C) once near wake — no "from baseline".
+        put_reading(
+            db,
+            opts.user_id,
+            WRIST_TEMP,
+            &format!("{:.2}", 36.2 + rng.gen_range(-0.3..0.4)),
+            "degC",
+            d,
+            6,
+            40,
+            6,
+            41,
+        )
+        .await?;
+        report.readings += 1;
+
         // Goals
         sqlx::query(
             "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
@@ -351,44 +421,73 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         .await?;
         report.goals += 1;
 
-        // Workout every other day.
+        // Varied workout types for Sessions chips (every other day).
         if d.ordinal().is_multiple_of(2) {
+            let kind = match d.ordinal() % 8 {
+                0 => (
+                    "HKWorkoutActivityTypeRunning",
+                    "Running",
+                    35.0,
+                    Some(5200.0),
+                    Some(300.0),
+                ),
+                2 => (
+                    "HKWorkoutActivityTypeWalking",
+                    "Walking",
+                    42.0,
+                    Some(3200.0),
+                    Some(140.0),
+                ),
+                4 => (
+                    "HKWorkoutActivityTypeTraditionalStrengthTraining",
+                    "Strength",
+                    28.0,
+                    None,
+                    Some(180.0),
+                ),
+                _ => ("HKWorkoutActivityTypeYoga", "Yoga", 40.0, None, Some(80.0)),
+            };
+            let (atype, _label, mins, dist, kcal) = kind;
+            let eh = 17 + (mins as u32) / 60;
+            let em = (mins as u32) % 60;
             let start_utc = format!("{d}T17:00:00Z");
-            let end_utc = format!("{d}T17:35:00Z");
+            let end_utc = format!("{d}T{eh:02}:{em:02}:00Z");
             let local_start = format!("{d} 17:00:00");
-            let local_end = format!("{d} 17:35:00");
+            let local_end = format!("{d} {eh:02}:{em:02}:00");
             let w = crate::workouts::Workout {
-                activity_type: "HKWorkoutActivityTypeRunning".into(),
+                activity_type: atype.into(),
                 channel: DEMO.into(),
                 source: SOURCE.into(),
                 start_utc: start_utc.clone(),
                 end_utc: end_utc.clone(),
                 local_start: Some(local_start),
                 local_end: Some(local_end),
-                duration_min: Some(35.0),
-                avg_hr: Some(145.0 + rng.gen_range(0.0..15.0)),
-                max_hr: Some(165.0 + rng.gen_range(0.0..20.0)),
-                active_kcal: Some(280.0 + rng.gen_range(0.0..80.0)),
-                total_kcal: Some(320.0),
-                distance_m: Some(5000.0 + rng.gen_range(0.0..1500.0)),
-                elevation_m: Some(40.0),
+                duration_min: Some(mins),
+                avg_hr: Some(120.0 + rng.gen_range(0.0..40.0)),
+                max_hr: Some(145.0 + rng.gen_range(0.0..35.0)),
+                active_kcal: kcal,
+                total_kcal: kcal.map(|k| k + 20.0),
+                distance_m: dist,
+                elevation_m: if dist.is_some() { Some(30.0) } else { None },
                 detail_json: Some(r#"{"demo":true}"#.into()),
-                external_id: Some(format!("demo-run-{d}")),
+                external_id: Some(format!(
+                    "demo-{}-{d}",
+                    atype.rsplit("Type").next().unwrap_or("w")
+                )),
                 id: None,
             };
             crate::workouts::upsert(db, opts.user_id, &w).await?;
-            // Duration reading for browse.
             put_reading(
                 db,
                 opts.user_id,
-                "HKWorkoutActivityTypeRunning",
-                "35",
+                atype,
+                &format!("{mins:.0}"),
                 "min",
                 d,
                 17,
                 0,
-                17,
-                35,
+                eh,
+                em,
             )
             .await?;
             report.workouts += 1;

@@ -1,8 +1,10 @@
 // Fitness tab: Apple Fitness "All Categories" inset list (imported data only).
+import { useMemo, useState } from "react";
 import { Link } from "../router";
 import { LargeTitle, NavBar } from "./ui";
-import { BrowseMetric, CatIcon, Chevron, DISTANCE, ENERGY, STEPS, useApi, useBrowse, when } from "./meta";
+import { BrowseMetric, CatIcon, Chevron, DISTANCE, ENERGY, STEPS, useApi, useBrowse } from "./meta";
 import { today } from "./range";
+import type { Workout } from "../api";
 
 const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 const STAND = "HKCategoryTypeIdentifierAppleStandHour";
@@ -72,25 +74,78 @@ export default function Fitness() {
   );
 }
 
-/** Sessions list — no Apple Sessions screenshot yet; plain inset list. */
+function chipLabel(atype: string) {
+  const p = prettyWorkout(atype);
+  if (/Walk/i.test(p)) return "Walking";
+  if (/Run/i.test(p)) return "Running";
+  if (/Swim/i.test(p)) return "Swimming";
+  if (/Strength|Traditional/i.test(p)) return "Strength";
+  if (/Yoga|Mind|Cool|Flexibility/i.test(p)) return "Mind & Body";
+  return "Workouts";
+}
+
+function sessionValue(w: Workout): string {
+  if (w.distance_m != null && w.distance_m > 0) {
+    const mi = w.distance_m / 1609.344;
+    return `${mi.toFixed(2)}MI`;
+  }
+  if (w.active_kcal != null) return `${Math.round(w.active_kcal)}CAL`;
+  if (w.duration_min != null) {
+    const m = Math.round(w.duration_min);
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return h ? `${h}:${String(mm).padStart(2, "0")}` : `0:${String(mm).padStart(2, "0")}`;
+  }
+  return "";
+}
+
+function monthHeading(iso: string) {
+  const d = new Date((iso.slice(0, 10)) + "T12:00:00");
+  return d.toLocaleDateString([], { month: "long", year: "numeric" });
+}
+
+/** Sessions: chips All/Workouts/types, month headings, cards with icon, lime value, date — no edit. */
 export function FitnessSessions() {
-  const wlist = useApi<{ workouts: import("../api").Workout[] }>("/workouts?limit=50");
+  const wlist = useApi<{ workouts: Workout[] }>("/workouts?limit=100");
+  const workouts = wlist.data?.workouts ?? [];
+  const chips = useMemo(() => {
+    const set = new Set<string>();
+    for (const w of workouts) set.add(chipLabel(w.activity_type));
+    return ["All", ...Array.from(set).sort()];
+  }, [workouts]);
+  const [chip, setChip] = useState("All");
+  const filtered = workouts.filter((w) => chip === "All" || chipLabel(w.activity_type) === chip);
+  const groups: { month: string; items: Workout[] }[] = [];
+  for (const w of filtered) {
+    const key = monthHeading(w.local_start ?? w.start_utc);
+    const last = groups[groups.length - 1];
+    if (last && last.month === key) last.items.push(w);
+    else groups.push({ month: key, items: [w] });
+  }
   return (
-    <div className="page">
+    <div className="page sessions-page">
       <NavBar to="/fitness" title="Sessions" />
-      <div className="group">
-        {(wlist.data?.workouts ?? []).map((w) => (
-          <Link key={w.id} to={`/workouts/${w.id}`} className="row">
-            <span className="row-label">
-              <b>{prettyWorkout(w.activity_type)}</b>
-              <small className="muted">{when(w.local_start ?? w.start_utc)}</small>
-            </span>
-            <span className="row-value num">{w.duration_min != null ? `${Math.round(w.duration_min)} min` : ""}</span>
-            <Chevron />
-          </Link>
+      <div className="chip-row" role="tablist">
+        {chips.map((c) => (
+          <button key={c} type="button" role="tab" aria-selected={chip === c} className={chip === c ? "chip on" : "chip"} onClick={() => setChip(c)}>{c}</button>
         ))}
-        {wlist.data && !wlist.data.workouts.length && <p className="muted pad">No sessions yet.</p>}
       </div>
+      {groups.map((g) => (
+        <div key={g.month} className="session-month">
+          <p className="group-title">{g.month}</p>
+          {g.items.map((w) => (
+            <Link key={w.id ?? w.external_id ?? w.start_utc} to={`/workouts/${w.id}`} className="session-card">
+              <span className="session-icon" aria-hidden><CatIcon k="activity" size={22} /></span>
+              <div className="session-body">
+                <b>{prettyWorkout(w.activity_type)}</b>
+                <span className="session-val num">{sessionValue(w)}</span>
+                <span className="muted small session-date">{(w.local_start ?? w.start_utc).slice(0, 10)}</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ))}
+      {wlist.data && !filtered.length && <p className="muted pad">No sessions yet.</p>}
     </div>
   );
 }

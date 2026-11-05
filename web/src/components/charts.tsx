@@ -252,3 +252,182 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
     </svg>
   );
 }
+
+
+/** Parse "YYYY-MM-DD HH:MM:SS" (or ISO) as local wall-clock ms. */
+function parseLocal(s: string): number {
+  const m = s.replace("T", " ").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return Date.parse(s);
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime();
+}
+
+/** Minutes since a clock origin (default 21:00) wrapping overnight. */
+function minsFromOrigin(ms: number, originHour = 21): number {
+  const d = new Date(ms);
+  let m = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60 - originHour * 60;
+  if (m < 0) m += 24 * 60;
+  return m;
+}
+
+const STAGE_COLOR: Record<string, string> = {
+  Awake: "var(--awake)",
+  AsleepREM: "var(--rem)",
+  AsleepCore: "var(--core)",
+  AsleepDeep: "var(--deep)",
+  AsleepUnspecified: "var(--unspecified)",
+  InBed: "var(--inbed)",
+};
+
+export type SleepSeg = { stage: string; start: string; end: string };
+export type SleepNightBar = {
+  date: string;
+  asleep_min: number;
+  in_bed_min?: number;
+  segments?: SleepSeg[];
+};
+
+/**
+ * W/M floating stage bars on a clock y-axis (21:00 → 09:00).
+ * `plain` paints all asleep segments one purple (Amounts / Comparisons sleep strip).
+ * 6M callers pass weekly aggregates as single InBed-style spans via segments.
+ */
+export function FloatingSleepBars(props: {
+  nights: SleepNightBar[];
+  height?: number;
+  plain?: boolean;
+  originHour?: number;
+  spanHours?: number;
+  labels?: "dow" | "day" | "month" | "none";
+}) {
+  const H = props.height ?? 220;
+  const origin = props.originHour ?? 21;
+  const span = (props.spanHours ?? 12) * 60;
+  const pad = { l: 8, r: 44, t: 8, b: 22 };
+  const nights = props.nights;
+  const n = Math.max(nights.length, 1);
+  const bw = (W - pad.l - pad.r) / n;
+  const y = (mins: number) => pad.t + ((H - pad.t - pad.b) * mins) / span;
+  const ticks: number[] = [];
+  for (let h = 0; h <= (props.spanHours ?? 12); h += 2) ticks.push(h * 60);
+  const fmtTick = (mins: number) => {
+    const total = (origin * 60 + mins) % (24 * 60);
+    const hh = Math.floor(total / 60);
+    return `${String(hh).padStart(2, "0")}:00`;
+  };
+  const xLabel = (date: string) => {
+    const d = new Date(date + "T12:00:00");
+    if (props.labels === "none") return "";
+    if (props.labels === "month") return d.toLocaleDateString([], { month: "short" });
+    if (props.labels === "day") return String(d.getDate());
+    return d.toLocaleDateString([], { weekday: "short" }).slice(0, 3);
+  };
+  const asleepish = (stage: string) =>
+    stage === "AsleepREM" || stage === "AsleepCore" || stage === "AsleepDeep" || stage === "AsleepUnspecified";
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="chart sleep-float" role="img" aria-label="Sleep by time of night">
+      {ticks.map((m) => (
+        <g key={m}>
+          <line x1={pad.l} x2={W - pad.r} y1={y(m)} y2={y(m)} stroke="var(--border)" strokeDasharray="3 5" />
+          <text x={W - pad.r + 6} y={y(m) + 4} className="axis">{fmtTick(m)}</text>
+        </g>
+      ))}
+      {nights.map((night, i) => {
+        const segs = (night.segments ?? []).filter((s) => s.stage !== "InBed");
+        const draw = props.plain
+          ? segs.filter((s) => asleepish(s.stage))
+          : segs.filter((s) => asleepish(s.stage) || s.stage === "Awake");
+        const cx = pad.l + i * bw;
+        const barW = Math.max(4, bw * 0.55);
+        const x0 = cx + (bw - barW) / 2;
+        return (
+          <g key={night.date + i}>
+            {i > 0 && (
+              <line x1={cx} x2={cx} y1={pad.t} y2={H - pad.b} stroke="var(--border)" strokeDasharray="2 4" opacity={0.7} />
+            )}
+            {draw.map((s, j) => {
+              const a = minsFromOrigin(parseLocal(s.start), origin);
+              const b = minsFromOrigin(parseLocal(s.end), origin);
+              const top = Math.min(a, b);
+              const bot = Math.max(a, b);
+              if (bot < 0 || top > span) return null;
+              const y1 = y(Math.max(0, top));
+              const y2 = y(Math.min(span, bot));
+              const fill = props.plain ? "var(--sleep-plain, #9b8cff)" : (STAGE_COLOR[s.stage] ?? "var(--core)");
+              return <rect key={j} x={x0} y={y1} width={barW} height={Math.max(1.5, y2 - y1)} fill={fill} rx={2} />;
+            })}
+            {props.labels !== "none" && (props.labels === "dow" || props.labels === "day" || i % Math.ceil(n / 6) === 0 || i === n - 1) && (
+              <text x={cx + bw / 2} y={H - 6} textAnchor="middle" className="axis">{xLabel(night.date)}</text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Compact HR range bars for Comparisons (min–max per sample). */
+export function VitalRangeBars(props: {
+  points: { start: string; end: string; min: number; max: number }[];
+  color: string;
+  height?: number;
+  yMin?: number;
+  yMax?: number;
+}) {
+  const H = props.height ?? 100;
+  const pad = { l: 28, r: 8, t: 10, b: 20 };
+  if (!props.points.length) return null;
+  const t0 = Math.min(...props.points.map((p) => parseLocal(p.start)));
+  const t1 = Math.max(...props.points.map((p) => parseLocal(p.end)));
+  const lo = props.yMin ?? Math.min(...props.points.map((p) => p.min)) - 5;
+  const hi = props.yMax ?? Math.max(...props.points.map((p) => p.max)) + 5;
+  const x = (ms: number) => pad.l + ((W - pad.l - pad.r) * (ms - t0)) / Math.max(t1 - t0, 1);
+  const y = (v: number) => pad.t + (H - pad.t - pad.b) * (1 - (v - lo) / Math.max(hi - lo, 1));
+  const ticks = [lo, (lo + hi) / 2, hi];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img">
+      {ticks.map((t) => (
+        <g key={t}>
+          <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} stroke="var(--border)" />
+          <text x={pad.l - 4} y={y(t) + 3} textAnchor="end" className="axis">{Math.round(t)}</text>
+        </g>
+      ))}
+      {props.points.map((p, i) => {
+        const cx = (x(parseLocal(p.start)) + x(parseLocal(p.end))) / 2;
+        const y1 = y(p.max);
+        const y2 = y(p.min);
+        return <rect key={i} x={cx - 2} y={y1} width={4} height={Math.max(2, y2 - y1)} rx={2} fill={props.color} />;
+      })}
+    </svg>
+  );
+}
+
+/** Simple 7-day asleep bars with average line (Highlights). */
+export function AvgAsleepBars(props: { nights: { date: string; asleep_min: number }[]; avg: number; height?: number }) {
+  const H = props.height ?? 120;
+  const pad = { l: 8, r: 8, t: 12, b: 22 };
+  const max = Math.max(props.avg, ...props.nights.map((n) => n.asleep_min), 1) * 1.15;
+  const n = Math.max(props.nights.length, 1);
+  const bw = (W - pad.l - pad.r) / n;
+  const y = (v: number) => pad.t + (H - pad.t - pad.b) * (1 - v / max);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img">
+      <line x1={pad.l} x2={W - pad.r} y1={y(props.avg)} y2={y(props.avg)} stroke="var(--c-sleep)" strokeWidth={2} />
+      {props.nights.map((d, i) => (
+        <g key={d.date}>
+          <rect
+            x={pad.l + i * bw + bw * 0.25}
+            y={y(d.asleep_min)}
+            width={bw * 0.5}
+            height={Math.max(0, H - pad.b - y(d.asleep_min))}
+            rx={3}
+            fill="var(--muted)"
+            opacity={0.55}
+          />
+          <text x={pad.l + i * bw + bw / 2} y={H - 6} textAnchor="middle" className="axis">
+            {new Date(d.date + "T12:00:00").toLocaleDateString([], { weekday: "narrow" })}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}

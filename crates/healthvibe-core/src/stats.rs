@@ -407,10 +407,13 @@ pub struct Night {
     pub asleep_min: f64,
     pub source: String,
     pub channel: String,
+    /// Imported samples for this night's chosen source, ordered by start.
+    #[serde(default)]
+    pub segments: Vec<Segment>,
 }
 
 /// One imported sleep sample, as stored.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct Segment {
     pub stage: String,
     pub start: String,
@@ -421,9 +424,41 @@ pub struct Segment {
 pub struct Sleep {
     pub nights: Vec<Night>,
     /// Every sample (all stages, InBed included) of the most recent date's
-    /// chosen source, ordered by start.
+    /// chosen source, ordered by start. Same as `nights.last().segments`.
     pub last_night: Vec<Segment>,
 }
+
+/// Min–max of an imported quantity overlapping a sleep window.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct VitalRange {
+    pub min: f64,
+    pub max: f64,
+    pub unit: Option<String>,
+}
+
+/// One heart-rate sample (or minute bucket) for the Comparisons chart.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct VitalPoint {
+    pub start: String,
+    pub end: String,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// Imported vitals that fall inside one night's sleep window.
+#[derive(Debug, Serialize, Clone, PartialEq, Default)]
+pub struct SleepVitals {
+    pub date: String,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub heart_rate: Option<VitalRange>,
+    pub respiratory_rate: Option<VitalRange>,
+    pub wrist_temperature: Option<VitalRange>,
+    pub heart_rate_series: Vec<VitalPoint>,
+}
+
+pub const RESPIRATORY: &str = "HKQuantityTypeIdentifierRespiratoryRate";
+pub const WRIST_TEMP: &str = "HKQuantityTypeIdentifierAppleSleepingWristTemperature";
 
 fn stage(value: &str) -> &str {
     value
@@ -481,31 +516,135 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
             best.insert(n.date.clone(), n);
         }
     }
-    let nights: Vec<Night> = best.into_values().collect();
-    let last_night = match nights.last() {
-        Some(n) => sqlx::query_as::<_, (String, String, String)>(
-            "SELECT value, local_start, local_end FROM readings
-             WHERE user_id = ? AND type = ? AND substr(local_end, 1, 10) = ?
-               AND channel = ? AND COALESCE(source, '') = ?
-             ORDER BY local_start, local_end",
-        )
-        .bind(user_id)
-        .bind(SLEEP)
-        .bind(&n.date)
-        .bind(&n.channel)
-        .bind(&n.source)
-        .fetch_all(db)
-        .await?
+    let mut nights: Vec<Night> = best.into_values().collect();
+    for n in &mut nights {
+        n.segments = night_segments(db, user_id, n).await?;
+    }
+    let last_night = nights
+        .last()
+        .map(|n| n.segments.clone())
+        .unwrap_or_default();
+    Ok(Sleep { nights, last_night })
+}
+
+async fn night_segments(db: &SqlitePool, user_id: i64, n: &Night) -> anyhow::Result<Vec<Segment>> {
+    Ok(sqlx::query_as::<_, (String, String, String)>(
+        "SELECT value, local_start, local_end FROM readings
+         WHERE user_id = ? AND type = ? AND substr(local_end, 1, 10) = ?
+           AND channel = ? AND COALESCE(source, '') = ?
+         ORDER BY local_start, local_end",
+    )
+    .bind(user_id)
+    .bind(SLEEP)
+    .bind(&n.date)
+    .bind(&n.channel)
+    .bind(&n.source)
+    .fetch_all(db)
+    .await?
+    .into_iter()
+    .map(|(v, start, end)| Segment {
+        stage: stage(&v).to_string(),
+        start,
+        end,
+    })
+    .collect())
+}
+
+/// Min–max (and HR series) of imported vitals overlapping the chosen night's
+/// sleep window. Empty when the night or the metric has no overlapping samples.
+pub async fn sleep_vitals(db: &SqlitePool, user_id: i64, end: &str) -> anyhow::Result<SleepVitals> {
+    let s = sleep(db, user_id, end, 1).await?;
+    let Some(n) = s.nights.first() else {
+        return Ok(SleepVitals {
+            date: end.to_string(),
+            ..Default::default()
+        });
+    };
+    let segs = &n.segments;
+    let (ws, we) = match (segs.first(), segs.last()) {
+        (Some(a), Some(b)) => (a.start.clone(), b.end.clone()),
+        _ => {
+            return Ok(SleepVitals {
+                date: n.date.clone(),
+                ..Default::default()
+            })
+        }
+    };
+    let heart_rate = vital_range(db, user_id, HEART_RATE, &ws, &we).await?;
+    let respiratory_rate = vital_range(db, user_id, RESPIRATORY, &ws, &we).await?;
+    let wrist_temperature = vital_range(db, user_id, WRIST_TEMP, &ws, &we).await?;
+    let heart_rate_series = vital_series(db, user_id, HEART_RATE, &ws, &we).await?;
+    Ok(SleepVitals {
+        date: n.date.clone(),
+        window_start: Some(ws),
+        window_end: Some(we),
+        heart_rate,
+        respiratory_rate,
+        wrist_temperature,
+        heart_rate_series,
+    })
+}
+
+async fn vital_range(
+    db: &SqlitePool,
+    user_id: i64,
+    kind: &str,
+    ws: &str,
+    we: &str,
+) -> anyhow::Result<Option<VitalRange>> {
+    let row: Option<(f64, f64, Option<String>)> = sqlx::query_as(
+        "SELECT MIN(CAST(value AS REAL)), MAX(CAST(value AS REAL)), MAX(unit)
+         FROM readings
+         WHERE user_id = ? AND type = ?
+           AND local_start < ? AND COALESCE(local_end, local_start) > ?
+           AND value GLOB '[0-9]*'
+         HAVING COUNT(*) > 0",
+    )
+    .bind(user_id)
+    .bind(kind)
+    .bind(we)
+    .bind(ws)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.and_then(|(min, max, unit)| {
+        if min.is_finite() && max.is_finite() {
+            Some(VitalRange { min, max, unit })
+        } else {
+            None
+        }
+    }))
+}
+
+async fn vital_series(
+    db: &SqlitePool,
+    user_id: i64,
+    kind: &str,
+    ws: &str,
+    we: &str,
+) -> anyhow::Result<Vec<VitalPoint>> {
+    let rows: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT local_start, COALESCE(local_end, local_start), CAST(value AS REAL)
+         FROM readings
+         WHERE user_id = ? AND type = ?
+           AND local_start < ? AND COALESCE(local_end, local_start) > ?
+           AND value GLOB '[0-9]*'
+         ORDER BY local_start",
+    )
+    .bind(user_id)
+    .bind(kind)
+    .bind(we)
+    .bind(ws)
+    .fetch_all(db)
+    .await?;
+    Ok(rows
         .into_iter()
-        .map(|(v, start, end)| Segment {
-            stage: stage(&v).to_string(),
+        .map(|(start, end, v)| VitalPoint {
             start,
             end,
+            min: v,
+            max: v,
         })
-        .collect(),
-        None => vec![],
-    };
-    Ok(Sleep { nights, last_night })
+        .collect())
 }
 
 #[derive(Debug, Serialize)]

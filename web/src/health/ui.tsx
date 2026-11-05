@@ -32,6 +32,7 @@ export function RoundBtn({ label, onClick, children, disabled }: { label: string
 
 export const BackIcon = () => <svg width="11" height="18" viewBox="0 0 11 18" aria-hidden><path d="M9 2 2 9l7 7" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 export const XIcon = () => <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><path d="M2 2l10 10M12 2 2 12" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>;
+export const CheckIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><path d="M3 8.5 6.5 12 13 4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 export const CalIcon = () => <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden><rect x="2" y="3.5" width="14" height="12.5" rx="3" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M2 7.5h14M6 2v3M12 2v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
 
 export function back(fallback: string) {
@@ -50,7 +51,7 @@ export function NavBar({ to, title, sub, right }: { to: string; title?: string; 
   );
 }
 
-export function Sheet({ title, onClose, children, left }: { title: string; onClose: () => void; children: React.ReactNode; left?: "x" | "back" }) {
+export function Sheet({ title, onClose, children, left, right }: { title: string; onClose: () => void; children: React.ReactNode; left?: "x" | "back"; right?: React.ReactNode }) {
   const startY = useRef<number | null>(null);
   const [dy, setDy] = useState(0);
   const onTouchStart = (e: React.TouchEvent) => {
@@ -84,7 +85,7 @@ export function Sheet({ title, onClose, children, left }: { title: string; onClo
         <div className="sheet-head">
           <RoundBtn label={left === "back" ? "Back" : "Close"} onClick={onClose}>{left === "back" ? <BackIcon /> : <XIcon />}</RoundBtn>
           <b>{title}</b>
-          <span style={{ width: 36 }} />
+          <div className="nb-right">{right ?? <span style={{ width: 36 }} />}</div>
         </div>
         <div className="sheet-body">{children}</div>
       </div>

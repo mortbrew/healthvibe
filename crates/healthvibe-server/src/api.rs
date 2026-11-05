@@ -44,6 +44,7 @@ pub fn routes() -> Router<AppState> {
         .route("/dashboard/activity", get(activity))
         .route("/dashboard/heart", get(heart))
         .route("/dashboard/sleep", get(sleep))
+        .route("/dashboard/sleep/vitals", get(sleep_vitals))
         .route("/dashboard/body", get(body))
         .route("/metrics", get(metrics))
         .route("/series", get(series))
@@ -492,6 +493,30 @@ async fn sleep(State(st): State<AppState>, User(u): User, Query(r): Query<Range>
     Ok(Json(json!(
         stats::sleep(&st.db, u.id, &end, r.days(14)).await?
     )))
+}
+
+async fn sleep_vitals(
+    State(st): State<AppState>,
+    User(u): User,
+    Query(r): Query<Range>,
+) -> ApiResult {
+    let end =
+        match r.end_valid()? {
+            Some(e) => Some(e),
+            None => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT substr(MAX(local_end), 1, 10) FROM readings WHERE user_id = ? AND type = ?",
+            )
+            .bind(u.id)
+            .bind(stats::SLEEP)
+            .fetch_one(&st.db)
+            .await?,
+        };
+    let Some(end) = end else {
+        return Ok(Json(
+            json!({ "date": null, "heart_rate": null, "respiratory_rate": null, "wrist_temperature": null, "heart_rate_series": [] }),
+        ));
+    };
+    Ok(Json(json!(stats::sleep_vitals(&st.db, u.id, &end).await?)))
 }
 
 async fn body(State(st): State<AppState>, User(u): User, Query(r): Query<Range>) -> ApiResult {
