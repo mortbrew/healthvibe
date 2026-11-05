@@ -25,7 +25,8 @@ const WEIGHT: &str = "HKQuantityTypeIdentifierBodyMass";
 pub struct SeedOpts {
     pub user_id: i64,
     pub days: i64,
-    /// Inclusive end date (local) `YYYY-MM-DD`. Defaults to today UTC date.
+    /// Inclusive end date (local calendar) `YYYY-MM-DD`. Defaults to today
+    /// in the process local timezone (so evenings do not spill into "tomorrow").
     pub end: Option<String>,
     pub rng_seed: u64,
 }
@@ -52,7 +53,9 @@ pub struct SeedReport {
 fn parse_end(end: &Option<String>) -> anyhow::Result<NaiveDate> {
     match end {
         Some(s) => Ok(NaiveDate::parse_from_str(s, "%Y-%m-%d")?),
-        None => Ok(chrono::Utc::now().date_naive()),
+        // Local, not UTC: the UI's "today" is the browser's local calendar day.
+        // Using UTC made evening (US) seeds end on tomorrow in the dashboard.
+        None => Ok(chrono::Local::now().date_naive()),
     }
 }
 
@@ -403,5 +406,46 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(w, a.workouts as i64);
+    }
+
+    #[tokio::test]
+    async fn seed_default_end_is_local_today_not_past() {
+        let db = crate::db::open_memory().await.unwrap();
+        let today = chrono::Local::now().date_naive();
+        let report = seed_demo(
+            &db,
+            SeedOpts {
+                user_id: 1,
+                days: 3,
+                end: None,
+                rng_seed: 7,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.days, 3);
+        let max_local: String = sqlx::query_scalar(
+            "SELECT max(substr(local_end, 1, 10)) FROM readings WHERE user_id = 1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let max_goal: String =
+            sqlx::query_scalar("SELECT max(date) FROM activity_goals WHERE user_id = 1")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        let today_s = today.format("%Y-%m-%d").to_string();
+        assert_eq!(max_local, today_s);
+        assert_eq!(max_goal, today_s);
+        // No sample's local end date is after today (overnight sleep ends on `end`).
+        let after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM readings WHERE user_id = 1 AND substr(local_end, 1, 10) > ?",
+        )
+        .bind(&today_s)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(after, 0);
     }
 }

@@ -40,7 +40,7 @@ enum Cmd {
         /// How many local days to generate, ending on `--end`.
         #[arg(long, default_value = "28")]
         days: i64,
-        /// Inclusive end date `YYYY-MM-DD` (default: today UTC).
+        /// Inclusive end date `YYYY-MM-DD` (default: today in the local timezone).
         #[arg(long)]
         end: Option<String>,
         /// RNG seed for reproducibility.
