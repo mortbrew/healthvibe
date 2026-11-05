@@ -8,8 +8,10 @@
 //! - `sleep_analysis` works unaggregated (one row per stage segment) and
 //!   aggregated (per night totals laid out as consecutive stage segments).
 //! - Unknown metrics are still stored, as `healthvibe.hae.<name>`.
-//! - Re-sent readings replace the earlier copy (key: type, time, source),
-//!   so a day total that grows during the day is updated, not doubled.
+//! - Every row is tagged `channel = health_auto_export`. Re-sent readings
+//!   upsert on `(type, channel, source, start, end)` so a day total that
+//!   grows during the day is updated, not doubled. Partial batches never
+//!   delete other metrics for that day.
 
 use crate::auth::sha256_hex;
 use crate::shortcut::{self as sc, Kind};
@@ -510,17 +512,38 @@ pub async fn ingest(
             tx.commit().await?;
             tx = db.begin().await?;
         }
-        let hash = sha256_hex(&format!("hae\x1f{}", r.key));
+        let source = r.source.clone().unwrap_or_default();
+        let start_u = utc(r.start);
+        let end_u = utc(r.end);
+        // Aggregated sleep stages share one wall-clock span; keep their
+        // distinct keys so Core/Deep/REM don't collapse into one row.
+        let hash = if r.key.contains("\x1faggregated\x1f") {
+            sha256_hex(&format!("hae\x1f{}", r.key))
+        } else {
+            crate::channel::reading_hash(
+                crate::channel::HEALTH_AUTO_EXPORT,
+                &r.kind,
+                &source,
+                &start_u,
+                &end_u,
+            )
+        };
         let old: Option<(Option<String>, String, String)> = sqlx::query_as(
-            "SELECT value, start_utc, end_utc FROM readings WHERE user_id = ? AND hash = ?",
+            "SELECT value, start_utc, end_utc FROM readings
+             WHERE user_id = ? AND type = ? AND channel = ? AND source = ?
+               AND start_utc = ? AND end_utc = ?",
         )
         .bind(user_id)
-        .bind(&hash)
+        .bind(&r.kind)
+        .bind(crate::channel::HEALTH_AUTO_EXPORT)
+        .bind(&source)
+        .bind(&start_u)
+        .bind(&end_u)
         .fetch_optional(&mut *tx)
         .await?;
         *res.types.entry(r.kind.clone()).or_default() += 1;
         match old {
-            Some((v, s, e)) if v == r.value && s == utc(r.start) && e == utc(r.end) => {
+            Some((v, s, e)) if v == r.value && s == start_u && e == end_u => {
                 res.unchanged += 1;
                 continue;
             }
@@ -529,23 +552,23 @@ pub async fn ingest(
         }
         sqlx::query(
             "INSERT INTO readings
-             (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, hash,
+             (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, channel, hash,
               local_start, local_end)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (user_id, hash) DO UPDATE SET
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, type, channel, source, start_utc, end_utc) DO UPDATE SET
                value = excluded.value, unit = excluded.unit,
-               start_utc = excluded.start_utc, end_utc = excluded.end_utc,
-               tz_offset = excluded.tz_offset, local_start = excluded.local_start,
-               local_end = excluded.local_end",
+               tz_offset = excluded.tz_offset, hash = excluded.hash,
+               local_start = excluded.local_start, local_end = excluded.local_end",
         )
         .bind(user_id)
         .bind(&r.kind)
         .bind(&r.value)
         .bind(&r.unit)
-        .bind(utc(r.start))
-        .bind(utc(r.end))
+        .bind(&start_u)
+        .bind(&end_u)
         .bind(r.start.format("%z").to_string())
-        .bind(&r.source)
+        .bind(&source)
+        .bind(crate::channel::HEALTH_AUTO_EXPORT)
         .bind(&hash)
         .bind(r.start.format("%Y-%m-%d %H:%M:%S").to_string())
         .bind(r.end.format("%Y-%m-%d %H:%M:%S").to_string())

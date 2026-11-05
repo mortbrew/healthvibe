@@ -57,13 +57,26 @@ pub async fn daily_sum(
     end: &str,
     days: i64,
 ) -> anyhow::Result<Vec<DayValue>> {
+    // Prefer best ingest channel for the day, then the device source with
+    // the highest total within that channel (see channel::rank).
     let rows: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT d, MAX(total) FROM (
-            SELECT substr(local_start, 1, 10) AS d, source, SUM(CAST(value AS REAL)) AS total
-            FROM readings
-            WHERE user_id = ? AND type = ? AND local_start >= ? AND local_start < ?
-            GROUP BY d, source)
-         GROUP BY d ORDER BY d",
+        &format!(
+            "SELECT d, total FROM (
+                SELECT d, total,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY d
+                         ORDER BY {rank} ASC, total DESC
+                       ) AS rn
+                FROM (
+                    SELECT substr(local_start, 1, 10) AS d, channel, source,
+                           SUM(CAST(value AS REAL)) AS total
+                    FROM readings
+                    WHERE user_id = ? AND type = ? AND local_start >= ? AND local_start < ?
+                    GROUP BY d, channel, source
+                )
+             ) WHERE rn = 1 ORDER BY d",
+            rank = crate::channel::RANK_SQL,
+        ),
     )
     .bind(user_id)
     .bind(kind)
@@ -147,10 +160,24 @@ pub async fn activity(
     let energy = daily_sum(db, user_id, ACTIVE_ENERGY, &date, 30).await?;
     let exercise = daily_sum(db, user_id, EXERCISE, &date, 1).await?;
     let stand: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT substr(local_start, 1, 13)) FROM readings
-         WHERE user_id = ? AND type = ? AND value = 'HKCategoryValueAppleStandHourStood'
-           AND local_start >= ? AND local_start < ?",
+        &format!(
+            "SELECT COUNT(DISTINCT substr(local_start, 1, 13)) FROM readings
+             WHERE user_id = ? AND type = ? AND value = 'HKCategoryValueAppleStandHourStood'
+               AND local_start >= ? AND local_start < ?
+               AND channel = (
+                 SELECT channel FROM readings
+                  WHERE user_id = ? AND type = ?
+                    AND value = 'HKCategoryValueAppleStandHourStood'
+                    AND local_start >= ? AND local_start < ?
+                  ORDER BY {rank} ASC LIMIT 1
+               )",
+            rank = crate::channel::RANK_SQL,
+        ),
     )
+    .bind(user_id)
+    .bind(STAND_HOUR)
+    .bind(&date)
+    .bind(shift(&date, 1))
     .bind(user_id)
     .bind(STAND_HOUR)
     .bind(&date)
@@ -296,12 +323,12 @@ fn stage(value: &str) -> &str {
 pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyhow::Result<Sleep> {
     // Night = local date of the sample's end; segments are grouped per source
     // and the source with the most recorded sleep wins (Watch over iPhone).
-    let rows: Vec<(String, String, String, f64)> = sqlx::query_as(
-        "SELECT substr(local_end, 1, 10) AS night, COALESCE(source, ''), value,
+    let rows: Vec<(String, String, String, String, f64)> = sqlx::query_as(
+        "SELECT substr(local_end, 1, 10) AS night, channel, COALESCE(source, ''), value,
                 SUM((julianday(end_utc) - julianday(start_utc)) * 1440)
          FROM readings
          WHERE user_id = ? AND type = ? AND local_end >= ? AND local_end < ?
-         GROUP BY night, source, value",
+         GROUP BY night, channel, source, value",
     )
     .bind(user_id)
     .bind(SLEEP)
@@ -309,13 +336,15 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
     .bind(shift(end, 2))
     .fetch_all(db)
     .await?;
-    let mut by: BTreeMap<(String, String), Night> = BTreeMap::new();
-    for (night, source, value, min) in rows {
-        let n = by.entry((night.clone(), source.clone())).or_insert(Night {
-            date: night,
-            source,
-            ..Default::default()
-        });
+    let mut by: BTreeMap<(String, String, String), Night> = BTreeMap::new();
+    for (night, channel, source, value, min) in rows {
+        let n = by
+            .entry((night.clone(), channel, source.clone()))
+            .or_insert(Night {
+                date: night,
+                source,
+                ..Default::default()
+            });
         match stage(&value) {
             "Awake" => n.awake_min += min,
             "AsleepREM" => n.rem_min += min,
@@ -327,17 +356,22 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
     }
     let asleep = |n: &Night| n.rem_min + n.core_min + n.deep_min + n.unspecified_min;
     let mut best: BTreeMap<String, Night> = BTreeMap::new();
-    for ((night, _), n) in by {
-        match best.get(&night) {
-            Some(b) if asleep(b) >= asleep(&n) => {}
+    let mut best_key: BTreeMap<String, (i64, f64, String)> = BTreeMap::new();
+    for ((night, channel, _), n) in by {
+        let rank = crate::channel::rank(&channel);
+        let a = asleep(&n);
+        match best_key.get(&night) {
+            Some(&(br, ba, _)) if br < rank || (br == rank && ba >= a) => {}
             _ => {
+                best_key.insert(night.clone(), (rank, a, channel));
                 best.insert(night, n);
             }
         }
     }
-    // Merged asleep time across every source, per night.
-    let ivs: Vec<(String, String, f64, f64)> = sqlx::query_as(
-        "SELECT substr(local_end, 1, 10), value, julianday(start_utc), julianday(end_utc)
+    // Merged asleep time for the preferred channel+source only.
+    let ivs: Vec<(String, String, String, String, f64, f64)> = sqlx::query_as(
+        "SELECT substr(local_end, 1, 10), channel, COALESCE(source, ''), value,
+                julianday(start_utc), julianday(end_utc)
          FROM readings
          WHERE user_id = ? AND type = ? AND local_end >= ? AND local_end < ?",
     )
@@ -347,8 +381,17 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
     .bind(shift(end, 2))
     .fetch_all(db)
     .await?;
+    // Union asleep intervals across every device source inside the preferred
+    // channel only (never across export_xml + HAE for the same night).
+    let preferred_channel: BTreeMap<String, String> = best_key
+        .iter()
+        .map(|(d, (_, _, ch))| (d.clone(), ch.clone()))
+        .collect();
     let mut per: BTreeMap<String, Vec<(f64, f64)>> = BTreeMap::new();
-    for (night, value, s, e) in ivs {
+    for (night, channel, _source, value, s, e) in ivs {
+        if preferred_channel.get(&night).map(|c| c == &channel) != Some(true) {
+            continue;
+        }
         if is_asleep(stage(&value)) && e > s {
             per.entry(night).or_default().push((s, e));
         }

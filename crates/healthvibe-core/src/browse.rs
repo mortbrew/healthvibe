@@ -167,15 +167,25 @@ pub async fn hourly(db: &SqlitePool, uid: i64, kind: &str, date: &str) -> anyhow
         // Categories (stand hours, sleep...): one per hour that has a non-idle sample.
         "SELECT CAST(substr(local_start, 12, 2) AS INTEGER) h, CAST(COUNT(*) > 0 AS REAL)
            FROM readings WHERE user_id = ? AND type = ? AND substr(local_start, 1, 10) = ?
-             AND COALESCE(value, '') NOT LIKE '%Idle' GROUP BY h"
+             AND COALESCE(value, '') NOT LIKE '%Idle' GROUP BY h".to_string()
     } else if agg == "sum" {
-        "SELECT h, MAX(t) FROM (SELECT CAST(substr(local_start, 12, 2) AS INTEGER) h, source, SUM(CAST(value AS REAL)) t
-           FROM readings WHERE user_id = ? AND type = ? AND substr(local_start, 1, 10) = ? GROUP BY h, source) GROUP BY h"
+        format!(
+            "SELECT h, t FROM (
+               SELECT h, t, ROW_NUMBER() OVER (PARTITION BY h ORDER BY {rank} ASC, t DESC) rn
+               FROM (
+                 SELECT CAST(substr(local_start, 12, 2) AS INTEGER) h, channel, source,
+                        SUM(CAST(value AS REAL)) t
+                 FROM readings WHERE user_id = ? AND type = ? AND substr(local_start, 1, 10) = ?
+                 GROUP BY h, channel, source
+               )
+             ) WHERE rn = 1",
+            rank = crate::channel::RANK_SQL,
+        )
     } else {
         "SELECT CAST(substr(local_start, 12, 2) AS INTEGER) h, AVG(CAST(value AS REAL))
-           FROM readings WHERE user_id = ? AND type = ? AND substr(local_start, 1, 10) = ? GROUP BY h"
+           FROM readings WHERE user_id = ? AND type = ? AND substr(local_start, 1, 10) = ? GROUP BY h".to_string()
     };
-    let rows: Vec<(i64, f64)> = sqlx::query_as(sql)
+    let rows: Vec<(i64, f64)> = sqlx::query_as(&sql)
         .bind(uid)
         .bind(kind)
         .bind(date)

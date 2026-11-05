@@ -2,7 +2,8 @@
 //!
 //! The zip is read from disk (never fully into memory); `export.xml` is
 //! streamed through quick-xml on a blocking thread and handed to the database
-//! in batches. Rows are deduplicated by a content hash (`UNIQUE(user_id, hash)`).
+//! in batches. Every row is tagged `channel = export_xml`. Re-sents upsert on
+//! the natural key `(user_id, type, channel, source, start_utc, end_utc)`.
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
@@ -111,15 +112,16 @@ fn to_row(tag: &[u8], a: &BTreeMap<String, String>) -> Option<Row> {
     };
     let (start_utc, off, local_start) = parse_date(a.get("startDate")?)?;
     let (end_utc, _, local_end) = parse_date(a.get("endDate")?)?;
-    let source = a.get("sourceName").cloned();
-    let key = format!(
-        "{kind}\x1f{}\x1f{}\x1f{start_utc}\x1f{end_utc}\x1f{}",
-        value.as_deref().unwrap_or(""),
-        unit.as_deref().unwrap_or(""),
-        source.as_deref().unwrap_or("")
+    let source = a.get("sourceName").cloned().unwrap_or_default();
+    let hash = crate::channel::reading_hash(
+        crate::channel::EXPORT_XML,
+        &kind,
+        &source,
+        &start_utc,
+        &end_utc,
     );
     Some(Row {
-        hash: crate::auth::sha256_hex(&key),
+        hash,
         kind,
         value,
         unit,
@@ -128,7 +130,7 @@ fn to_row(tag: &[u8], a: &BTreeMap<String, String>) -> Option<Row> {
         tz_offset: Some(off),
         local_start,
         local_end,
-        source,
+        source: Some(source).filter(|s| !s.is_empty()),
     })
 }
 
@@ -223,11 +225,20 @@ async fn insert_batch(
                 continue;
             }
         };
+        let source = r.source.clone().unwrap_or_default();
         let res = sqlx::query(
-            "INSERT OR IGNORE INTO readings
-             (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, hash,
+            "INSERT INTO readings
+             (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, channel, hash,
               local_start, local_end)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, type, channel, source, start_utc, end_utc) DO UPDATE SET
+               value = excluded.value, unit = excluded.unit,
+               tz_offset = excluded.tz_offset, hash = excluded.hash,
+               local_start = excluded.local_start, local_end = excluded.local_end
+             WHERE value IS NOT excluded.value
+                OR unit IS NOT excluded.unit
+                OR local_start IS NOT excluded.local_start
+                OR local_end IS NOT excluded.local_end",
         )
         .bind(user_id)
         .bind(&r.kind)
@@ -236,13 +247,15 @@ async fn insert_batch(
         .bind(&r.start_utc)
         .bind(&r.end_utc)
         .bind(&r.tz_offset)
-        .bind(&r.source)
+        .bind(&source)
+        .bind(crate::channel::EXPORT_XML)
         .bind(&r.hash)
         .bind(&r.local_start)
         .bind(&r.local_end)
         .execute(&mut *tx)
         .await?;
         let c = counts.entry(r.kind).or_default();
+        // rows_affected: 1 = insert, 2 = update (SQLite), 0 = unchanged conflict.
         if res.rows_affected() == 1 {
             c.inserted += 1;
         } else {

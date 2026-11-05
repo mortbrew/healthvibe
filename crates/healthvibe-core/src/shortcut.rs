@@ -1188,18 +1188,14 @@ fn utc(t: DateTime<FixedOffset>) -> String {
         .to_string()
 }
 
-/// Same content hash as the export.xml importer, so a Shortcut upload that
-/// overlaps an import never doubles up.
-fn hash(s: &Sample) -> String {
-    sha256_hex(&format!(
-        "{}\x1f{}\x1f{}\x1f{}\x1f{}\x1f{}",
-        s.kind,
-        s.value.as_deref().unwrap_or(""),
-        s.unit.as_deref().unwrap_or(""),
-        utc(s.start),
-        utc(s.end),
-        s.source.as_deref().unwrap_or("")
-    ))
+fn sample_hash(s: &Sample) -> String {
+    crate::channel::reading_hash(
+        crate::channel::SHORTCUT,
+        &s.kind,
+        s.source.as_deref().unwrap_or(""),
+        &utc(s.start),
+        &utc(s.end),
+    )
 }
 
 /// Delete raw bodies whose debugging window has passed.
@@ -1331,11 +1327,20 @@ async fn parse_and_store(
     for (key, samples) in &batches {
         let mut newest: Option<DateTime<FixedOffset>> = None;
         for s in samples {
+            let source = s.source.clone().unwrap_or_default();
             let r = sqlx::query(
-                "INSERT OR IGNORE INTO readings
-                 (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, hash,
+                "INSERT INTO readings
+                 (user_id, type, value, unit, start_utc, end_utc, tz_offset, source, channel, hash,
                   local_start, local_end)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (user_id, type, channel, source, start_utc, end_utc) DO UPDATE SET
+                   value = excluded.value, unit = excluded.unit,
+                   tz_offset = excluded.tz_offset, hash = excluded.hash,
+                   local_start = excluded.local_start, local_end = excluded.local_end
+                 WHERE value IS NOT excluded.value
+                    OR unit IS NOT excluded.unit
+                    OR local_start IS NOT excluded.local_start
+                    OR local_end IS NOT excluded.local_end",
             )
             .bind(user_id)
             .bind(&s.kind)
@@ -1344,8 +1349,9 @@ async fn parse_and_store(
             .bind(utc(s.start))
             .bind(utc(s.end))
             .bind(s.start.format("%z").to_string())
-            .bind(&s.source)
-            .bind(hash(s))
+            .bind(&source)
+            .bind(crate::channel::SHORTCUT)
+            .bind(sample_hash(s))
             .bind(s.start.format("%Y-%m-%d %H:%M:%S").to_string())
             .bind(s.end.format("%Y-%m-%d %H:%M:%S").to_string())
             .execute(&mut *tx)

@@ -4,6 +4,7 @@
 pub mod auth;
 pub mod awards;
 pub mod browse;
+pub mod channel;
 pub mod config;
 pub mod dashboards;
 pub mod db;
