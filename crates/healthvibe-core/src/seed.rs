@@ -19,6 +19,10 @@ const HR: &str = "HKQuantityTypeIdentifierHeartRate";
 const RHR: &str = "HKQuantityTypeIdentifierRestingHeartRate";
 const HRV: &str = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN";
 const SLEEP: &str = "HKCategoryTypeIdentifierSleepAnalysis";
+const SLEEP_CORE: &str = "HKCategoryValueSleepAnalysisAsleepCore";
+const SLEEP_DEEP: &str = "HKCategoryValueSleepAnalysisAsleepDeep";
+const SLEEP_REM: &str = "HKCategoryValueSleepAnalysisAsleepREM";
+const SLEEP_AWAKE: &str = "HKCategoryValueSleepAnalysisAwake";
 const WEIGHT: &str = "HKQuantityTypeIdentifierBodyMass";
 const RESPIRATORY: &str = "HKQuantityTypeIdentifierRespiratoryRate";
 const WRIST_TEMP: &str = "HKQuantityTypeIdentifierAppleSleepingWristTemperature";
@@ -132,68 +136,150 @@ async fn put_reading(
     Ok(())
 }
 
-/// One Watch-style night ending the morning of `end_day`: Awake / REM / Core / Deep.
-/// Every segment's `local_end` is on `end_day` so end-date attribution shows the
-/// full evening→morning window (no daytime samples). Returns rows inserted.
-async fn put_sleep_night(db: &SqlitePool, user_id: i64, end_day: NaiveDate) -> anyhow::Result<u64> {
-    let prev = end_day - Duration::days(1);
-    // (stage, day, start_h, start_m, end_h, end_m) — overnight via end < start on `prev`.
-    let segs: &[(&str, NaiveDate, u32, u32, u32, u32)] = &[
-        // First Core crosses midnight so the evening appears on this night date.
-        ("HKCategoryValueSleepAnalysisAsleepCore", prev, 22, 10, 1, 5),
-        (
-            "HKCategoryValueSleepAnalysisAsleepDeep",
-            end_day,
-            1,
-            5,
-            2,
-            0,
-        ),
-        (
-            "HKCategoryValueSleepAnalysisAsleepCore",
-            end_day,
-            2,
-            0,
-            3,
-            10,
-        ),
-        (
-            "HKCategoryValueSleepAnalysisAsleepREM",
-            end_day,
-            3,
-            10,
-            3,
-            55,
-        ),
-        ("HKCategoryValueSleepAnalysisAwake", end_day, 3, 55, 4, 5),
-        (
-            "HKCategoryValueSleepAnalysisAsleepCore",
-            end_day,
-            4,
-            5,
-            5,
-            25,
-        ),
-        (
-            "HKCategoryValueSleepAnalysisAsleepDeep",
-            end_day,
-            5,
-            25,
-            6,
-            5,
-        ),
-        (
-            "HKCategoryValueSleepAnalysisAsleepREM",
-            end_day,
-            6,
-            5,
-            6,
-            55,
-        ),
-        ("HKCategoryValueSleepAnalysisAwake", end_day, 6, 55, 7, 10),
-    ];
-    for (stage, day, sh, sm, eh, em) in segs {
-        put_reading(db, user_id, SLEEP, stage, "", *day, *sh, *sm, *eh, *em).await?;
+/// Split `total` into `parts` integers that sum to `total`, each at least
+/// `min_each` when the budget allows. Keeps demo stages from collapsing to a minute.
+fn split_positive(total: i32, parts: usize, min_each: i32, rng: &mut StdRng) -> Vec<i32> {
+    let floor = if parts > 0 && total >= min_each * parts as i32 {
+        min_each
+    } else {
+        1
+    };
+    let mut out = vec![floor; parts];
+    let mut left = total - floor * parts as i32;
+    while left > 0 && parts > 0 {
+        let i = rng.gen_range(0..parts);
+        let give = rng.gen_range(1..=left.min(40));
+        out[i] += give;
+        left -= give;
+    }
+    out
+}
+
+/// (day offset from the wake date, hour, minute). Negative minutes are the previous evening.
+fn wall(mins_from_midnight: i32) -> (i64, u32, u32) {
+    let (delta, m) = if mins_from_midnight < 0 {
+        (-1, mins_from_midnight + 24 * 60)
+    } else {
+        (0, mins_from_midnight)
+    };
+    (delta, (m / 60) as u32, (m % 60) as u32)
+}
+
+fn assign_stage(durs: &mut [i32], pattern: &[&str], stage: &str, budget: i32, rng: &mut StdRng) {
+    let idx: Vec<usize> = pattern
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| **s == stage)
+        .map(|(i, _)| i)
+        .collect();
+    let n = idx.len();
+    let min_each = if stage == SLEEP_AWAKE { 4 } else { 12 };
+    for (i, part) in idx
+        .into_iter()
+        .zip(split_positive(budget, n, min_each, rng))
+    {
+        durs[i] = part;
+    }
+}
+
+/// Awake / REM / Core / Deep minutes that sum to `remain` (the post-midnight window).
+fn stage_budgets(remain: i32, rng: &mut StdRng) -> (i32, i32, i32, i32) {
+    let awake = rng.gen_range(8..28i32);
+    let deep = rng.gen_range(22..70i32);
+    let mut rem = rng.gen_range(36..90i32);
+    let mut core = remain - awake - deep - rem;
+    if core < 40 {
+        let take = (40 - core).min((rem - 30).max(0));
+        rem -= take;
+        core += take;
+    }
+    (awake, deep, rem, core)
+}
+
+/// One varied Watch-style night. Minutes are relative to midnight of the wake date
+/// (negative = previous evening). The first stage crosses midnight, so every
+/// sample's end is on the wake date. Segments are contiguous and use only
+/// Awake / REM / Core / Deep.
+fn demo_sleep_segments(rng: &mut StdRng) -> Vec<(&'static str, i32, i32)> {
+    let bed = 22 * 60 + rng.gen_range(0..110i32) - 24 * 60;
+    let cross_end = rng.gen_range(20..95i32);
+    let wake = rng.gen_range(5 * 60 + 35..8 * 60 + 5);
+    let (awake, deep, rem, core) = stage_budgets(wake - cross_end, rng);
+    let pattern: &[&str] = match rng.gen_range(0..4i32) {
+        0 => &[
+            SLEEP_DEEP,
+            SLEEP_CORE,
+            SLEEP_REM,
+            SLEEP_CORE,
+            SLEEP_AWAKE,
+            SLEEP_REM,
+            SLEEP_CORE,
+            SLEEP_AWAKE,
+        ],
+        1 => &[
+            SLEEP_REM,
+            SLEEP_CORE,
+            SLEEP_DEEP,
+            SLEEP_CORE,
+            SLEEP_AWAKE,
+            SLEEP_CORE,
+            SLEEP_REM,
+            SLEEP_AWAKE,
+        ],
+        2 => &[
+            SLEEP_CORE,
+            SLEEP_DEEP,
+            SLEEP_REM,
+            SLEEP_AWAKE,
+            SLEEP_CORE,
+            SLEEP_DEEP,
+            SLEEP_REM,
+            SLEEP_CORE,
+            SLEEP_AWAKE,
+        ],
+        _ => &[
+            SLEEP_DEEP,
+            SLEEP_CORE,
+            SLEEP_AWAKE,
+            SLEEP_REM,
+            SLEEP_CORE,
+            SLEEP_DEEP,
+            SLEEP_CORE,
+            SLEEP_REM,
+            SLEEP_AWAKE,
+        ],
+    };
+    let mut durs = vec![0; pattern.len()];
+    assign_stage(&mut durs, pattern, SLEEP_CORE, core, rng);
+    assign_stage(&mut durs, pattern, SLEEP_DEEP, deep, rng);
+    assign_stage(&mut durs, pattern, SLEEP_REM, rem, rng);
+    assign_stage(&mut durs, pattern, SLEEP_AWAKE, awake, rng);
+    let mut out = Vec::with_capacity(pattern.len() + 1);
+    // Opening Core crosses midnight so the evening is attributed to the wake date.
+    out.push((SLEEP_CORE, bed, cross_end));
+    let mut t = cross_end;
+    for (stage, dur) in pattern.iter().zip(durs) {
+        out.push((*stage, t, t + dur));
+        t += dur;
+    }
+    out
+}
+
+/// One varied night ending the morning of `end_day`. Every segment's `local_end`
+/// is on `end_day` (no daytime samples). Stage totals are the segment durations.
+/// Returns rows inserted.
+async fn put_sleep_night(
+    db: &SqlitePool,
+    user_id: i64,
+    end_day: NaiveDate,
+    rng: &mut StdRng,
+) -> anyhow::Result<u64> {
+    let segs = demo_sleep_segments(rng);
+    for (stage, start_min, end_min) in &segs {
+        let (d0, sh, sm) = wall(*start_min);
+        let (_d1, eh, em) = wall(*end_min);
+        let day = end_day + Duration::days(d0);
+        put_reading(db, user_id, SLEEP, stage, "", day, sh, sm, eh, em).await?;
     }
     Ok(segs.len() as u64)
 }
@@ -335,9 +421,10 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         .await?;
         report.readings += 8;
 
-        // Realistic overnight sleep ending this morning (Watch-style stages).
-        // No daytime nap samples — seed shows only a night window.
-        report.readings += put_sleep_night(db, opts.user_id, d).await?;
+        // Varied overnight sleep ending this morning (Watch-style stages).
+        // No daytime nap samples — each night is one evening→morning window
+        // whose samples all end on this local date.
+        report.readings += put_sleep_night(db, opts.user_id, d, &mut rng).await?;
 
         // Overnight vitals overlapping the sleep window (for Comparisons).
         let prev = d - Duration::days(1);
@@ -540,50 +627,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_sleep_is_realistic_four_stage_night() {
+    async fn seed_sleep_nights_vary_and_stages_match() {
         let db = crate::db::open_memory().await.unwrap();
         seed_demo(
             &db,
             SeedOpts {
                 user_id: 1,
-                days: 3,
+                days: 7,
                 end: Some("2024-06-07".into()),
                 rng_seed: 42,
             },
         )
         .await
         .unwrap();
-        let s = crate::stats::sleep(&db, 1, "2024-06-07", 3).await.unwrap();
-        assert!(!s.nights.is_empty());
-        let n = s.nights.last().unwrap();
-        assert!(n.core_min > 0.0, "core {n:?}");
-        assert!(n.deep_min > 0.0, "deep {n:?}");
-        assert!(n.rem_min > 0.0, "rem {n:?}");
-        assert!(n.awake_min > 0.0, "awake {n:?}");
-        assert_eq!(n.unspecified_min, 0.0);
-        assert_eq!(
-            n.asleep_min.round(),
-            (n.rem_min + n.core_min + n.deep_min + n.unspecified_min).round()
-        );
-        assert!(!s.last_night.is_empty());
-        for seg in &s.last_night {
-            assert!(
-                seg.end.starts_with("2024-06-07"),
-                "segment must end on night date: {seg:?}"
+        let s = crate::stats::sleep(&db, 1, "2024-06-07", 7).await.unwrap();
+        assert_eq!(s.nights.len(), 7, "one night per local end date");
+        let parse =
+            |t: &str| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S").unwrap();
+        let mut asleep = Vec::new();
+        for n in &s.nights {
+            assert!(n.core_min > 0.0, "core {n:?}");
+            assert!(n.deep_min > 0.0, "deep {n:?}");
+            assert!(n.rem_min > 0.0, "rem {n:?}");
+            assert!(n.awake_min > 0.0, "awake {n:?}");
+            assert_eq!(n.unspecified_min, 0.0);
+            assert_eq!(n.in_bed_min, 0.0);
+            assert_eq!(
+                n.asleep_min.round(),
+                (n.rem_min + n.core_min + n.deep_min + n.unspecified_min).round()
             );
-            let hour: u32 = seg.end[11..13].parse().unwrap();
-            assert!(hour < 12, "daytime end on night date: {seg:?}");
+            let prev = chrono::NaiveDate::parse_from_str(&n.date, "%Y-%m-%d").unwrap()
+                - chrono::Duration::days(1);
+            assert!(
+                n.segments[0]
+                    .start
+                    .starts_with(&prev.format("%Y-%m-%d").to_string()),
+                "chart opens the previous evening: {}",
+                n.segments[0].start
+            );
+            let open_h: u32 = n.segments[0].start[11..13].parse().unwrap();
+            assert!(
+                (22..24).contains(&open_h),
+                "bedtime {}",
+                n.segments[0].start
+            );
+            let mut by = std::collections::HashMap::<&str, i64>::new();
+            for w in n.segments.windows(2) {
+                assert_eq!(w[0].end, w[1].start, "stages must be contiguous");
+            }
+            for seg in &n.segments {
+                assert!(
+                    seg.end.starts_with(&n.date),
+                    "segment must end on night date: {seg:?}"
+                );
+                let hour: u32 = seg.end[11..13].parse().unwrap();
+                assert!(hour < 12, "daytime end on night date: {seg:?}");
+                let mins = (parse(&seg.end) - parse(&seg.start)).num_minutes();
+                assert!(mins > 0, "{seg:?}");
+                *by.entry(seg.stage.as_str()).or_default() += mins;
+            }
+            assert!((by["Awake"] as f64 - n.awake_min).abs() < 0.6);
+            assert!((by["AsleepREM"] as f64 - n.rem_min).abs() < 0.6);
+            assert!((by["AsleepCore"] as f64 - n.core_min).abs() < 0.6);
+            assert!((by["AsleepDeep"] as f64 - n.deep_min).abs() < 0.6);
+            asleep.push(n.asleep_min.round() as i64);
         }
-        let t0 = &s.last_night[0].start;
+        let (lo, hi) = (asleep.iter().min().unwrap(), asleep.iter().max().unwrap());
         assert!(
-            t0.starts_with("2024-06-06 22:") || t0.starts_with("2024-06-06 23:"),
-            "chart should open in the evening: {t0}"
+            hi - lo >= 20,
+            "demo nights should differ, asleep minutes {asleep:?}"
         );
-        let stages: std::collections::HashSet<_> =
-            s.last_night.iter().map(|g| g.stage.as_str()).collect();
-        for need in ["Awake", "AsleepREM", "AsleepCore", "AsleepDeep"] {
-            assert!(stages.contains(need), "missing {need} in {stages:?}");
-        }
+        assert_eq!(s.last_night, s.nights.last().unwrap().segments);
     }
 
     #[tokio::test]

@@ -327,8 +327,6 @@ function SleepHighlightsInline({ end, nights, lastNight }: { end: string | null;
       <div key="avg7" className="hl-card">
         <p className="hl-head" style={{ color: "var(--c-sleep)" }}><CatIcon k="sleep" size={16} /> Sleep</p>
         <p>You slept an average of {hm(avg)} over the last {nights.length} days.</p>
-        <p className="muted small">Average Time Asleep</p>
-        <p className="big num">{hm(avg)}</p>
         <AvgAsleepBars nights={nights.slice(-7)} avg={avg} />
       </div>,
     );
@@ -376,8 +374,6 @@ function SleepHighlightsFull({ end, nights, lastNight }: { end: string | null; n
           <div className="hl-card">
             <p className="hl-head" style={{ color: "var(--c-sleep)" }}><CatIcon k="sleep" size={16} /> Sleep</p>
             <p>You slept an average of {hm(avg)} over the last {nights.length} days.</p>
-            <p className="muted small">Average Time Asleep</p>
-            <p className="big num">{hm(avg)}</p>
             <AvgAsleepBars nights={nights.slice(-7)} avg={avg} />
           </div>
         );

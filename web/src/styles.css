@@ -557,6 +557,22 @@ body:has(.sheet-backdrop), body:has(.fullsheet) { overflow: hidden; touch-action
 }
 .hl-head { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: 0 0 .35rem; }
 .hl-card p { margin: .25rem 0 .5rem; line-height: 1.35; }
+.avg-sleep { position: relative; --avg-line: #707bf6; --avg-bar: #48484a; margin-top: .2rem; }
+.avg-kicker {
+  position: absolute; left: 0; width: 40%; margin: 0; z-index: 3; pointer-events: none;
+  color: var(--muted); font-size: .78rem; font-weight: 600; line-height: 1.15;
+  bottom: calc(100% - var(--line) + 8px);
+}
+.avg-value {
+  position: absolute; left: 0; width: 42%; margin: 0; z-index: 3; pointer-events: none;
+  top: calc(var(--line) + 8px);
+  font-size: 1.35rem; font-weight: 700; letter-spacing: -.03em; line-height: 1;
+}
+.avg-value small { font-size: .55em; font-weight: 650; margin: 0 .1em; }
+.avg-rule {
+  position: absolute; left: 0; right: 0; top: var(--line); height: 4px;
+  transform: translateY(-50%); background: var(--avg-line); border-radius: 99px; z-index: 2;
+}
 .highlights-sec .sec-head { display: flex; align-items: baseline; justify-content: space-between; }
 .highlights-sec h2 { font-size: 1.35rem; margin: .5rem 0; }
 
