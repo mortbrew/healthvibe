@@ -97,8 +97,8 @@ pub fn from_hae(w: &Value, channel: &str) -> Result<Workout, String> {
     let o = w.as_object().ok_or("workout is not an object")?;
     let start = crate::shortcut::parse_ts(&txt(o.get("start")).ok_or("missing start")?)
         .ok_or("bad start")?;
-    let end = crate::shortcut::parse_ts(&txt(o.get("end")).ok_or("missing end")?)
-        .ok_or("bad end")?;
+    let end =
+        crate::shortcut::parse_ts(&txt(o.get("end")).ok_or("missing end")?).ok_or("bad end")?;
     if end < start {
         return Err("end before start".into());
     }
@@ -248,7 +248,11 @@ impl ExportChildren {
 }
 
 fn f(a: &BTreeMap<String, String>, k: &str) -> Option<f64> {
-    a.get(k)?.trim().parse::<f64>().ok().filter(|x| x.is_finite())
+    a.get(k)?
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|x| x.is_finite())
 }
 
 /// Energy in kcal when Apple's unit is kcal/Cal; other units stay NULL in the
@@ -285,21 +289,36 @@ pub fn from_export(attrs: &BTreeMap<String, String>, kids: &ExportChildren) -> O
     let (start_utc, _, local_start) = crate::import::parse_date(attrs.get("startDate")?)?;
     let (end_utc, _, local_end) = crate::import::parse_date(attrs.get("endDate")?)?;
     let source = attrs.get("sourceName").cloned().unwrap_or_default();
-    let duration_min = f(attrs, "duration").map(|d| match attrs.get("durationUnit").map(|u| u.as_str()) {
-        Some("sec") | Some("s") => d / 60.0,
-        Some("hr") | Some("hour") => d * 60.0,
-        _ => d, // min
-    });
+    let duration_min =
+        f(attrs, "duration").map(|d| match attrs.get("durationUnit").map(|u| u.as_str()) {
+            Some("sec") | Some("s") => d / 60.0,
+            Some("hr") | Some("hour") => d * 60.0,
+            _ => d, // min
+        });
     let distance_m = f(attrs, "totalDistance")
-        .map(|d| to_meters(d, attrs.get("totalDistanceUnit").map(|s| s.as_str()).unwrap_or("m")))
+        .map(|d| {
+            to_meters(
+                d,
+                attrs
+                    .get("totalDistanceUnit")
+                    .map(|s| s.as_str())
+                    .unwrap_or("m"),
+            )
+        })
         .or_else(|| {
             let s = kids.statistics.iter().find(|s| {
                 s.get("type")
                     .is_some_and(|t| t.starts_with("HKQuantityTypeIdentifierDistance"))
             })?;
-            Some(to_meters(f(s, "sum")?, s.get("unit").map(|u| u.as_str()).unwrap_or("m")))
+            Some(to_meters(
+                f(s, "sum")?,
+                s.get("unit").map(|u| u.as_str()).unwrap_or("m"),
+            ))
         });
-    let total_kcal = kcal(f(attrs, "totalEnergyBurned"), attrs.get("totalEnergyBurnedUnit"));
+    let total_kcal = kcal(
+        f(attrs, "totalEnergyBurned"),
+        attrs.get("totalEnergyBurnedUnit"),
+    );
     let active_kcal = kids
         .stat("ActiveEnergyBurned")
         .and_then(|s| kcal(f(s, "sum"), s.get("unit")));

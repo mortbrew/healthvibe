@@ -83,10 +83,7 @@ mod tests {
         let a = reading_hash(EXPORT_XML, "T", "Watch", "a", "b");
         let b = reading_hash(EXPORT_XML, "T", "Watch", "a", "b");
         assert_eq!(a, b);
-        assert_ne!(
-            a,
-            reading_hash(HEALTH_AUTO_EXPORT, "T", "Watch", "a", "b")
-        );
+        assert_ne!(a, reading_hash(HEALTH_AUTO_EXPORT, "T", "Watch", "a", "b"));
     }
 }
 
@@ -139,8 +136,28 @@ mod integration {
         let db = open_memory().await.unwrap();
         let steps = "HKQuantityTypeIdentifierStepCount";
         // Same day: HAE Watch 5000, export.xml Watch 8000 → use export.
-        add(&db, 1, steps, HEALTH_AUTO_EXPORT, "Watch", "2024-06-01", "2500", 0).await;
-        add(&db, 1, steps, HEALTH_AUTO_EXPORT, "Watch", "2024-06-01", "2500", 1).await;
+        add(
+            &db,
+            1,
+            steps,
+            HEALTH_AUTO_EXPORT,
+            "Watch",
+            "2024-06-01",
+            "2500",
+            0,
+        )
+        .await;
+        add(
+            &db,
+            1,
+            steps,
+            HEALTH_AUTO_EXPORT,
+            "Watch",
+            "2024-06-01",
+            "2500",
+            1,
+        )
+        .await;
         add(&db, 1, steps, EXPORT_XML, "Watch", "2024-06-01", "4000", 2).await;
         add(&db, 1, steps, EXPORT_XML, "Watch", "2024-06-01", "4000", 3).await;
         // Phone export would be lower total; still prefer export channel's max source.
@@ -156,7 +173,17 @@ mod integration {
     async fn daily_sum_uses_hae_when_no_export_that_day() {
         let db = open_memory().await.unwrap();
         let steps = "HKQuantityTypeIdentifierStepCount";
-        add(&db, 1, steps, HEALTH_AUTO_EXPORT, "Watch", "2024-06-02", "3000", 0).await;
+        add(
+            &db,
+            1,
+            steps,
+            HEALTH_AUTO_EXPORT,
+            "Watch",
+            "2024-06-02",
+            "3000",
+            0,
+        )
+        .await;
         // Export covers a different day only.
         add(&db, 1, steps, EXPORT_XML, "Watch", "2024-06-01", "9000", 1).await;
         let days = crate::stats::daily_sum(&db, 1, steps, "2024-06-02", 1)
@@ -248,8 +275,18 @@ mod integration {
             rows,
             vec![
                 ("2024-06-01".into(), "export_xml".into(), Some(650.0), None),
-                ("2024-06-02".into(), "shortcut".into(), Some(420.0), Some(25.0)),
-                ("2024-06-03".into(), "unknown".into(), Some(300.0), Some(10.0)),
+                (
+                    "2024-06-02".into(),
+                    "shortcut".into(),
+                    Some(420.0),
+                    Some(25.0)
+                ),
+                (
+                    "2024-06-03".into(),
+                    "unknown".into(),
+                    Some(300.0),
+                    Some(10.0)
+                ),
             ]
         );
     }
@@ -257,11 +294,21 @@ mod integration {
     #[tokio::test]
     async fn activity_goals_view_matches_rank() {
         let db = open_memory().await.unwrap();
-        let chans = [EXPORT_XML, HEALTH_AUTO_EXPORT, SHORTCUT, DEMO, UNKNOWN, "other"];
+        let chans = [
+            EXPORT_XML,
+            HEALTH_AUTO_EXPORT,
+            SHORTCUT,
+            DEMO,
+            UNKNOWN,
+            "other",
+        ];
         for (i, a) in chans.iter().enumerate() {
             for b in &chans[i + 1..] {
                 let day = format!("2024-01-{:02}", 1 + (rank(a) * 6 + rank(b)) % 28);
-                sqlx::query("DELETE FROM activity_goals").execute(&db).await.unwrap();
+                sqlx::query("DELETE FROM activity_goals")
+                    .execute(&db)
+                    .await
+                    .unwrap();
                 for c in [a, b] {
                     sqlx::query("INSERT INTO activity_goals (user_id, date, channel, move_kcal) VALUES (1, ?, ?, 1)")
                         .bind(&day)
@@ -270,10 +317,11 @@ mod integration {
                         .await
                         .unwrap();
                 }
-                let got: String = sqlx::query_scalar("SELECT channel FROM activity_goals_best WHERE user_id = 1")
-                    .fetch_one(&db)
-                    .await
-                    .unwrap();
+                let got: String =
+                    sqlx::query_scalar("SELECT channel FROM activity_goals_best WHERE user_id = 1")
+                        .fetch_one(&db)
+                        .await
+                        .unwrap();
                 let want = if rank(a) <= rank(b) { a } else { b };
                 assert_eq!(rank(&got), rank(want), "{a} vs {b}");
             }

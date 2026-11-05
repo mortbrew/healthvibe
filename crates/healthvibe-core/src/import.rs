@@ -460,7 +460,10 @@ pub async fn cleanup_staging(db: &SqlitePool, dir: &Path) -> anyhow::Result<usiz
         for e in entries.flatten() {
             let Ok(ft) = e.file_type() else { continue };
             let name = e.file_name();
-            if ft.is_file() && is_staging_leftover(&name.to_string_lossy()) && std::fs::remove_file(e.path()).is_ok() {
+            if ft.is_file()
+                && is_staging_leftover(&name.to_string_lossy())
+                && std::fs::remove_file(e.path()).is_ok()
+            {
                 removed += 1;
             }
         }
@@ -565,7 +568,10 @@ mod tests {
         // Record / route metadata never leaks onto the workout.
         assert!(d["metadata"].get("RecordOnly").is_none());
         assert!(d["metadata"].get("RouteOnly").is_none());
-        assert_eq!(d["route_files"][0], "/workout-routes/route_2024-03-01_6.00pm.gpx");
+        assert_eq!(
+            d["route_files"][0],
+            "/workout-routes/route_2024-03-01_6.00pm.gpx"
+        );
         // A self-closing workout still parses, with no detail.
         assert_eq!(ws[1].activity_type, "HKWorkoutActivityTypeYoga");
         assert_eq!(ws[1].detail_json, None);
@@ -593,7 +599,11 @@ mod tests {
         let _ = std::fs::remove_file(&p);
         assert_eq!(rows.len(), 2, "re-import does not duplicate");
         assert_eq!(rows[0].1, Some(151.2));
-        assert!(rows[0].2.as_deref().unwrap().contains("HKWorkoutEventTypeSegment"));
+        assert!(rows[0]
+            .2
+            .as_deref()
+            .unwrap()
+            .contains("HKWorkoutEventTypeSegment"));
     }
 
     #[test]

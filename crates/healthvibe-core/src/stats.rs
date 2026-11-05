@@ -22,7 +22,6 @@ pub const WEIGHT: &str = "HKQuantityTypeIdentifierBodyMass";
 pub const BODY_FAT: &str = "HKQuantityTypeIdentifierBodyFatPercentage";
 pub const LEAN_MASS: &str = "HKQuantityTypeIdentifierLeanBodyMass";
 
-
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct DayValue {
     pub date: String,
@@ -56,9 +55,8 @@ pub async fn daily_sum(
 ) -> anyhow::Result<Vec<DayValue>> {
     // Prefer best ingest channel for the day, then the device source with
     // the highest total within that channel (see channel::rank).
-    let rows: Vec<(String, f64)> = sqlx::query_as(
-        &format!(
-            "SELECT d, total FROM (
+    let rows: Vec<(String, f64)> = sqlx::query_as(&format!(
+        "SELECT d, total FROM (
                 SELECT d, total,
                        ROW_NUMBER() OVER (
                          PARTITION BY d
@@ -72,9 +70,8 @@ pub async fn daily_sum(
                     GROUP BY d, channel, source
                 )
              ) WHERE rn = 1 ORDER BY d",
-            rank = crate::channel::RANK_SQL,
-        ),
-    )
+        rank = crate::channel::RANK_SQL,
+    ))
     .bind(user_id)
     .bind(kind)
     .bind(shift(end, 1 - days))
@@ -157,9 +154,8 @@ pub async fn activity(
     let steps = daily_sum(db, user_id, STEPS, &date, 30).await?;
     let energy = daily_sum(db, user_id, ACTIVE_ENERGY, &date, 30).await?;
     let exercise = daily_sum(db, user_id, EXERCISE, &date, 1).await?;
-    let stand: i64 = sqlx::query_scalar(
-        &format!(
-            "SELECT COUNT(DISTINCT substr(local_start, 1, 13)) FROM readings
+    let stand: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(DISTINCT substr(local_start, 1, 13)) FROM readings
              WHERE user_id = ? AND type = ? AND value = 'HKCategoryValueAppleStandHourStood'
                AND local_start >= ? AND local_start < ?
                AND channel = (
@@ -169,9 +165,8 @@ pub async fn activity(
                     AND local_start >= ? AND local_start < ?
                   ORDER BY {rank} ASC LIMIT 1
                )",
-            rank = crate::channel::RANK_SQL,
-        ),
-    )
+        rank = crate::channel::RANK_SQL,
+    ))
     .bind(user_id)
     .bind(STAND_HOUR)
     .bind(&date)
@@ -340,10 +335,11 @@ pub async fn sleep(db: &SqlitePool, user_id: i64, end: &str, days: i64) -> anyho
         let better = match best.get(&n.date) {
             None => true,
             Some(b) => {
-                let (r, br) = (crate::channel::rank(&n.channel), crate::channel::rank(&b.channel));
-                r < br
-                    || (r == br
-                        && (n.asleep_min, n.in_bed_min) > (b.asleep_min, b.in_bed_min))
+                let (r, br) = (
+                    crate::channel::rank(&n.channel),
+                    crate::channel::rank(&b.channel),
+                );
+                r < br || (r == br && (n.asleep_min, n.in_bed_min) > (b.asleep_min, b.in_bed_min))
             }
         };
         if better {
@@ -569,7 +565,10 @@ mod tests {
         let latest = latest_day(&db, 1).await.unwrap().unwrap();
         let r = activity(&db, 1, None).await.unwrap().rings.unwrap();
         // No ActivitySummary: no goal at all (no default).
-        assert_eq!((r.move_goal, r.exercise_goal, r.stand_goal), (None, None, None));
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (None, None, None)
+        );
         sqlx::query(
             "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
              VALUES (1, ?, 'export_xml', 650, 45, NULL),
@@ -596,7 +595,10 @@ mod tests {
             .unwrap()
             .rings
             .unwrap();
-        assert_eq!((r.move_goal, r.exercise_goal, r.stand_goal), (None, None, None));
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (None, None, None)
+        );
     }
 
     #[tokio::test]
@@ -608,21 +610,64 @@ mod tests {
         // simply another sample on that date), and iPhone InBed + unstaged
         // asleep samples that are never mixed with the Watch.
         for (st, s, e, src) in [
-            ("InBed", "2024-01-01 22:30:00", "2024-01-02 06:30:00", "iPhone"),
-            ("AsleepUnspecified", "2024-01-01 23:30:00", "2024-01-02 05:00:00", "iPhone"),
-            ("AsleepCore", "2024-01-01 23:00:00", "2024-01-02 01:00:00", "Watch"),
-            ("AsleepDeep", "2024-01-02 01:00:00", "2024-01-02 02:00:00", "Watch"),
-            ("Awake", "2024-01-02 02:00:00", "2024-01-02 02:30:00", "Watch"),
-            ("AsleepREM", "2024-01-02 02:30:00", "2024-01-02 03:30:00", "Watch"),
-            ("AsleepCore", "2024-01-02 03:30:00", "2024-01-02 06:00:00", "Watch"),
-            ("AsleepUnspecified", "2024-01-02 13:00:00", "2024-01-02 14:00:00", "Watch"),
+            (
+                "InBed",
+                "2024-01-01 22:30:00",
+                "2024-01-02 06:30:00",
+                "iPhone",
+            ),
+            (
+                "AsleepUnspecified",
+                "2024-01-01 23:30:00",
+                "2024-01-02 05:00:00",
+                "iPhone",
+            ),
+            (
+                "AsleepCore",
+                "2024-01-01 23:00:00",
+                "2024-01-02 01:00:00",
+                "Watch",
+            ),
+            (
+                "AsleepDeep",
+                "2024-01-02 01:00:00",
+                "2024-01-02 02:00:00",
+                "Watch",
+            ),
+            (
+                "Awake",
+                "2024-01-02 02:00:00",
+                "2024-01-02 02:30:00",
+                "Watch",
+            ),
+            (
+                "AsleepREM",
+                "2024-01-02 02:30:00",
+                "2024-01-02 03:30:00",
+                "Watch",
+            ),
+            (
+                "AsleepCore",
+                "2024-01-02 03:30:00",
+                "2024-01-02 06:00:00",
+                "Watch",
+            ),
+            (
+                "AsleepUnspecified",
+                "2024-01-02 13:00:00",
+                "2024-01-02 14:00:00",
+                "Watch",
+            ),
         ] {
             add(&db, 1, SLEEP, &v(st), s, e, src).await;
         }
         let s = sleep(&db, 1, "2024-01-02", 14).await.unwrap();
         assert_eq!(s.nights.len(), 1, "{:?}", s.nights);
         let n = &s.nights[0];
-        assert_eq!((n.date.as_str(), n.source.as_str()), ("2024-01-02", "Watch"));
+        assert_eq!(
+            (n.date.as_str(), n.source.as_str()),
+            ("2024-01-02", "Watch")
+        );
         // Plain sum of the Watch's asleep samples: 120+60+60+150+60.
         assert_eq!(n.asleep_min.round(), 450.0);
         assert_eq!(n.unspecified_min.round(), 60.0);
@@ -633,10 +678,22 @@ mod tests {
         assert_eq!(s.last_night[2].stage, "Awake");
         assert_eq!(s.last_night[5].start, "2024-01-02 13:00:00");
         // An InBed-only date is shown as what it is: in-bed time, 0 asleep.
-        add(&db, 1, SLEEP, &v("InBed"), "2024-01-02 23:00:00", "2024-01-03 07:00:00", "iPhone").await;
+        add(
+            &db,
+            1,
+            SLEEP,
+            &v("InBed"),
+            "2024-01-02 23:00:00",
+            "2024-01-03 07:00:00",
+            "iPhone",
+        )
+        .await;
         let s = sleep(&db, 1, "2024-01-03", 14).await.unwrap();
         assert_eq!(s.nights.len(), 2);
-        assert_eq!((s.nights[1].asleep_min, s.nights[1].in_bed_min.round()), (0.0, 480.0));
+        assert_eq!(
+            (s.nights[1].asleep_min, s.nights[1].in_bed_min.round()),
+            (0.0, 480.0)
+        );
         assert_eq!(s.last_night.len(), 1);
         assert_eq!(s.last_night[0].stage, "InBed");
     }

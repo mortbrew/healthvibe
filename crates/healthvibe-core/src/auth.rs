@@ -169,13 +169,14 @@ fn now_rfc3339() -> String {
 }
 
 async fn locked_until(db: &SqlitePool, username: &str) -> anyhow::Result<Option<String>> {
-    let row: Option<(i64, Option<String>)> = sqlx::query_as(
-        "SELECT fail_count, locked_until FROM auth_failures WHERE username = ?",
-    )
-    .bind(username)
-    .fetch_optional(db)
-    .await?;
-    let Some((_n, until)) = row else { return Ok(None) };
+    let row: Option<(i64, Option<String>)> =
+        sqlx::query_as("SELECT fail_count, locked_until FROM auth_failures WHERE username = ?")
+            .bind(username)
+            .fetch_optional(db)
+            .await?;
+    let Some((_n, until)) = row else {
+        return Ok(None);
+    };
     let Some(until) = until else { return Ok(None) };
     if until > now_rfc3339() {
         Ok(Some(until))

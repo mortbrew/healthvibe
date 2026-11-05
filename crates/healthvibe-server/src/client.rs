@@ -34,10 +34,16 @@ fn trusted(list: &[Cidr], ip: IpAddr) -> bool {
 /// headers are ignored.
 pub fn resolve(list: &[Cidr], peer: Option<IpAddr>, h: &HeaderMap) -> Client {
     let Some(peer) = peer.map(|p| p.to_canonical()) else {
-        return Client { ip: "unknown".into(), via_trusted_proxy: false };
+        return Client {
+            ip: "unknown".into(),
+            via_trusted_proxy: false,
+        };
     };
     if !trusted(list, peer) {
-        return Client { ip: peer.to_string(), via_trusted_proxy: false };
+        return Client {
+            ip: peer.to_string(),
+            via_trusted_proxy: false,
+        };
     }
     let parse = |s: &str| s.trim().parse::<IpAddr>().ok().map(|i| i.to_canonical());
     let hops: Vec<IpAddr> = h
@@ -59,7 +65,10 @@ pub fn resolve(list: &[Cidr], peer: Option<IpAddr>, h: &HeaderMap) -> Client {
                 .filter(|ip| !trusted(list, *ip))
         })
         .unwrap_or(peer);
-    Client { ip: ip.to_string(), via_trusted_proxy: true }
+    Client {
+        ip: ip.to_string(),
+        via_trusted_proxy: true,
+    }
 }
 
 pub fn from_parts(st: &AppState, p: &Parts) -> Client {
@@ -85,7 +94,10 @@ mod tests {
     fn hm(pairs: &[(&str, &str)]) -> HeaderMap {
         let mut h = HeaderMap::new();
         for (k, v) in pairs {
-            h.append(axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
+            h.append(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
         }
         h
     }
@@ -103,10 +115,24 @@ mod tests {
         let c = resolve(&list, ip("10.0.0.2"), &h);
         assert_eq!((c.ip.as_str(), c.via_trusted_proxy), ("198.51.100.7", true));
         // X-Real-IP fallback, then the peer.
-        assert_eq!(resolve(&list, ip("10.0.0.2"), &hm(&[("x-real-ip", "198.51.100.8")])).ip, "198.51.100.8");
-        assert_eq!(resolve(&list, ip("10.0.0.2"), &hm(&[("x-forwarded-for", "garbage")])).ip, "10.0.0.2");
+        assert_eq!(
+            resolve(&list, ip("10.0.0.2"), &hm(&[("x-real-ip", "198.51.100.8")])).ip,
+            "198.51.100.8"
+        );
+        assert_eq!(
+            resolve(
+                &list,
+                ip("10.0.0.2"),
+                &hm(&[("x-forwarded-for", "garbage")])
+            )
+            .ip,
+            "10.0.0.2"
+        );
         // Multiple XFF headers are one list.
-        let h = hm(&[("x-forwarded-for", "6.6.6.6"), ("x-forwarded-for", "198.51.100.9")]);
+        let h = hm(&[
+            ("x-forwarded-for", "6.6.6.6"),
+            ("x-forwarded-for", "198.51.100.9"),
+        ]);
         assert_eq!(resolve(&list, ip("10.0.0.2"), &h).ip, "198.51.100.9");
         // IPv4-mapped peer.
         assert!(resolve(&list, ip("::ffff:10.0.0.2"), &h).via_trusted_proxy);

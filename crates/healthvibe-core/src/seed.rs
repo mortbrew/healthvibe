@@ -152,7 +152,16 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         let weight = 72.0 + (d.ordinal() as f64 % 7.0) * 0.05;
 
         put_reading(
-            db, opts.user_id, STEPS, &steps.to_string(), "count", d, 8, 0, 21, 0,
+            db,
+            opts.user_id,
+            STEPS,
+            &steps.to_string(),
+            "count",
+            d,
+            8,
+            0,
+            21,
+            0,
         )
         .await?;
         put_reading(
@@ -375,12 +384,11 @@ mod tests {
         assert_eq!(a.readings, b.readings);
         assert_eq!(a.workouts, b.workouts);
         assert!(a.workouts >= 3);
-        let channels: Vec<String> = sqlx::query_scalar(
-            "SELECT DISTINCT channel FROM readings WHERE user_id = 1",
-        )
-        .fetch_all(&db)
-        .await
-        .unwrap();
+        let channels: Vec<String> =
+            sqlx::query_scalar("SELECT DISTINCT channel FROM readings WHERE user_id = 1")
+                .fetch_all(&db)
+                .await
+                .unwrap();
         assert_eq!(channels, vec![DEMO.to_string()]);
         let daytime: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM readings WHERE user_id = 1 AND type = ? AND local_start LIKE '% 13:%'",

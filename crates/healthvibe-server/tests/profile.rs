@@ -124,12 +124,22 @@ async fn awards_feature_is_gone() {
         ("PUT", "/api/v1/awards/apple/monthly_challenge"),
         ("PUT", "/api/v1/me/awards"),
     ] {
-        let (s, v, _) = call(&app, m, u, Some(&admin), Some(json!({"earned": true, "enabled": true}))).await;
+        let (s, v, _) = call(
+            &app,
+            m,
+            u,
+            Some(&admin),
+            Some(json!({"earned": true, "enabled": true})),
+        )
+        .await;
         assert_ne!(s, StatusCode::OK, "{m} {u}");
         assert!(v.get("apple_only").is_none() && v.get("awards").is_none());
     }
     let (s, v, _) = call(&app, "GET", "/api/v1/session", Some(&admin), None).await;
-    assert_eq!((s, &v["user"]["username"]), (StatusCode::OK, &json!("toby")));
+    assert_eq!(
+        (s, &v["user"]["username"]),
+        (StatusCode::OK, &json!("toby"))
+    );
     assert!(v["user"].get("awards_enabled").is_none());
     let tables: Vec<String> =
         sqlx::query_scalar("SELECT name FROM sqlite_master WHERE name LIKE '%award%'")
@@ -346,8 +356,10 @@ async fn csv_export_includes_workouts() {
     assert_eq!(lines[0], "type,value,unit,start_utc,end_utc,source");
     let w = "2026-01-01T10:00:00Z,2026-01-01T10:30:00Z,Synthetic";
     assert!(lines.contains(&format!("Workout:HKWorkoutActivityTypeRunning,,,{w}").as_str()));
-    assert!(lines.contains(&format!("Workout:HKWorkoutActivityTypeRunning:duration,30,min,{w}").as_str()));
-    assert!(lines.contains(&format!("Workout:HKWorkoutActivityTypeRunning:distance,5000,m,{w}").as_str()));
+    assert!(lines
+        .contains(&format!("Workout:HKWorkoutActivityTypeRunning:duration,30,min,{w}").as_str()));
+    assert!(lines
+        .contains(&format!("Workout:HKWorkoutActivityTypeRunning:distance,5000,m,{w}").as_str()));
     // Absent values get no row; other users' workouts are not included.
     assert!(!csv.contains(":avg_heart_rate") && !csv.contains(",99,"));
     assert_eq!(lines.len(), 1 + 1 + 3);

@@ -167,7 +167,8 @@ pub async fn hourly(db: &SqlitePool, uid: i64, kind: &str, date: &str) -> anyhow
         // Categories (stand hours, sleep...): one per hour that has a non-idle sample.
         "SELECT CAST(substr(local_start, 12, 2) AS INTEGER) h, CAST(COUNT(*) > 0 AS REAL)
            FROM readings WHERE user_id = ? AND type = ? AND substr(local_start, 1, 10) = ?
-             AND COALESCE(value, '') NOT LIKE '%Idle' GROUP BY h".to_string()
+             AND COALESCE(value, '') NOT LIKE '%Idle' GROUP BY h"
+            .to_string()
     } else if agg == "sum" {
         format!(
             "SELECT h, t FROM (

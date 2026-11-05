@@ -96,7 +96,9 @@ pub struct Forwarded(bool);
 impl FromRequestParts<AppState> for Forwarded {
     type Rejection = std::convert::Infallible;
     async fn from_request_parts(p: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
-        Ok(Forwarded(crate::client::from_parts(st, p).via_trusted_proxy))
+        Ok(Forwarded(
+            crate::client::from_parts(st, p).via_trusted_proxy,
+        ))
     }
 }
 

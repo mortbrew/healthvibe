@@ -4,7 +4,6 @@
 pub mod auth;
 pub mod browse;
 pub mod channel;
-pub mod workouts;
 pub mod config;
 pub mod dashboards;
 pub mod db;
@@ -15,3 +14,4 @@ pub mod profile;
 pub mod seed;
 pub mod shortcut;
 pub mod stats;
+pub mod workouts;

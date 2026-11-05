@@ -183,7 +183,11 @@ async fn login(
     Json(c): Json<Credentials>,
 ) -> ApiResult<Response> {
     let ip = client.ip;
-    if !crate::sync::allow(format!("login-ip:{ip}"), 60, std::time::Duration::from_secs(600)) {
+    if !crate::sync::allow(
+        format!("login-ip:{ip}"),
+        60,
+        std::time::Duration::from_secs(600),
+    ) {
         return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
     }
     match auth::login(&st.db, &auth::normalize_username(&c.username), &c.password).await? {
@@ -493,7 +497,6 @@ async fn body(State(st): State<AppState>, User(u): User, Query(r): Query<Range>)
         stats::body(&st.db, u.id, &end, r.days(90)).await?
     )))
 }
-
 
 #[derive(Deserialize)]
 struct WorkoutsQuery {

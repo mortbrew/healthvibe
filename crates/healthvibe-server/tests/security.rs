@@ -20,7 +20,12 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 fn rand_u64() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    );
     h.finish()
 }
 
@@ -88,7 +93,9 @@ async fn upload(app: &Router, cookie: &str, file: &[u8], with_len: bool) -> (Sta
         .await
         .unwrap();
     let s = res.status();
-    let b = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let b = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     (s, serde_json::from_slice(&b).unwrap_or(Value::Null))
 }
 
@@ -113,10 +120,16 @@ async fn upload_over_limit_is_413_and_leaves_no_file() {
     // Announced too large: rejected before reading.
     let big = vec![b'x'; 200_000];
     let (s, v) = upload(&app, &cookie, &big, true).await;
-    assert_eq!((s, v["error"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!("upload_too_large")));
+    assert_eq!(
+        (s, v["error"].clone()),
+        (StatusCode::PAYLOAD_TOO_LARGE, json!("upload_too_large"))
+    );
     // No Content-Length (streamed): rejected while writing, partial file removed.
     let (s, v) = upload(&app, &cookie, &vec![b'x'; 5000], false).await;
-    assert_eq!((s, v["error"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!("upload_too_large")));
+    assert_eq!(
+        (s, v["error"].clone()),
+        (StatusCode::PAYLOAD_TOO_LARGE, json!("upload_too_large"))
+    );
     assert!(staged(&dir).is_empty());
     // Under the limit is accepted (the bad zip then fails in the import job).
     let (s, v) = upload(&app, &cookie, b"not really a zip", true).await;
@@ -147,7 +160,9 @@ async fn startup_cleanup_removes_leftovers_only() {
         .await
         .unwrap();
     let job = healthvibe_core::import::create_job(&db, 1).await.unwrap();
-    let n = healthvibe_core::import::cleanup_staging(&db, &dir).await.unwrap();
+    let n = healthvibe_core::import::cleanup_staging(&db, &dir)
+        .await
+        .unwrap();
     assert_eq!(n, 3);
     let mut left: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
@@ -193,11 +208,17 @@ async fn security_headers_on_api_and_spa() {
         assert_eq!(h[header::REFERRER_POLICY], "no-referrer");
         assert_eq!(h[header::X_FRAME_OPTIONS], "DENY");
         assert!(h.contains_key("permissions-policy"));
-        assert!(!h.contains_key(header::STRICT_TRANSPORT_SECURITY), "HSTS is opt-in");
+        assert!(
+            !h.contains_key(header::STRICT_TRANSPORT_SECURITY),
+            "HSTS is opt-in"
+        );
     }
     let (app, _db, _) = app_with(|c| c.hsts_max_age = Some(31536000)).await;
     let res = get(&app, "/healthz").await;
-    assert_eq!(res.headers()[header::STRICT_TRANSPORT_SECURITY], "max-age=31536000");
+    assert_eq!(
+        res.headers()[header::STRICT_TRANSPORT_SECURITY],
+        "max-age=31536000"
+    );
     let _ = std::fs::remove_dir_all(&web);
 }
 
@@ -215,7 +236,9 @@ async fn hae_url_from(app: &Router, cookie: &str, peer: &str) -> String {
     ));
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), 200);
-    let b = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let b = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: Value = serde_json::from_slice(&b).unwrap();
     v["url"].as_str().unwrap().to_string()
 }
@@ -230,7 +253,10 @@ async fn forwarded_host_only_believed_from_trusted_proxies() {
     .await;
     let cookie = setup(&app).await;
     let untrusted = hae_url_from(&app, &cookie, "203.0.113.5:4000").await;
-    assert!(untrusted.starts_with("https://direct.example:8000/"), "{untrusted}");
+    assert!(
+        untrusted.starts_with("https://direct.example:8000/"),
+        "{untrusted}"
+    );
     let trusted = hae_url_from(&app, &cookie, "172.18.0.2:4000").await;
     assert!(trusted.starts_with("http://spoofed.example/"), "{trusted}");
 }
