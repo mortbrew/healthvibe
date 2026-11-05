@@ -220,6 +220,11 @@ const ADDITIVE: &[&str] = &[
 
 /// Default aggregation for a metric type: sum, avg, or count (categories, workouts).
 pub fn default_agg(kind: &str) -> &'static str {
+    // Sleep Analysis: sum stage durations (minutes). Other categories stay count
+    // unless they are workouts (sum duration).
+    if kind == crate::stats::SLEEP {
+        return "sum";
+    }
     if kind.starts_with("HKCategoryTypeIdentifier") || kind.starts_with("HKWorkoutActivityType") {
         return if kind.starts_with("HKWorkout") {
             "sum"
@@ -339,6 +344,18 @@ pub async fn daily(
     end: &str,
     days: i64,
 ) -> anyhow::Result<Vec<DayValue>> {
+    // Sleep: sum of asleep minutes per night (local end date), never sample count.
+    if kind == stats::SLEEP {
+        let s = stats::sleep(db, uid, end, days).await?;
+        return Ok(s
+            .nights
+            .into_iter()
+            .map(|n| DayValue {
+                date: n.date,
+                value: n.asleep_min,
+            })
+            .collect());
+    }
     match agg {
         "sum" => stats::daily_sum(db, uid, kind, end, days).await,
         "avg" => stats::daily_avg(db, uid, kind, end, days).await,
@@ -448,7 +465,7 @@ mod tests {
             default_agg("HKQuantityTypeIdentifierWalkingHeartRateAverage"),
             "avg"
         );
-        assert_eq!(default_agg(stats::SLEEP), "count");
+        assert_eq!(default_agg(stats::SLEEP), "sum");
     }
     #[test]
     fn buckets() {
