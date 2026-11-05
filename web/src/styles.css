@@ -121,9 +121,11 @@ progress { width: 100%; accent-color: var(--accent); }
 .lead { font-size: 1.05rem; }
 .notice { border-left: 4px solid var(--awake); }
 .guide { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; }
-.step { display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; background: var(--surface); border-radius: 18px; padding: 1.15rem; border: 1px solid var(--border); align-items: start; }
+.step { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1rem; background: var(--surface); border-radius: 18px; padding: 1.15rem; border: 1px solid var(--border); align-items: start; }
 .stepnum { width: 2rem; height: 2rem; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 800; }
+.stepbody { min-width: 0; overflow-wrap: anywhere; }
 .stepbody p { margin-top: 0; }
+.stepbody pre { max-width: 100%; overflow-x: auto; }
 .shot { margin: 0; text-align: center; font-size: 0.75rem; }
 .phone { width: 110px; height: 200px; border-radius: 22px; border: 3px solid var(--border); background: var(--surface-2); display: grid; place-items: center; position: relative; padding: 0.5rem; color: var(--muted); font-weight: 600; }
 .notch { position: absolute; top: 6px; width: 40px; height: 8px; border-radius: 6px; background: var(--border); }
@@ -131,7 +133,7 @@ progress { width: 100%; accent-color: var(--accent); }
   background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; border: 1px solid var(--border); margin: 0.5rem 0; }
 .linkcard { color: var(--text); }
 .linkcard:hover { border-color: var(--accent); }
-@media (max-width: 760px) { .step { grid-template-columns: auto 1fr; } .shot { grid-column: 2; justify-self: start; } }
+@media (max-width: 760px) { .step { grid-template-columns: auto minmax(0, 1fr); } .shot { grid-column: 2; justify-self: start; } }
 .metricgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin: 0.75rem 0; }
 .metricgrid fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 0.5rem 0.75rem; }
 .metricgrid legend { color: var(--muted); font-size: 0.82rem; }
