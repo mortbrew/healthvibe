@@ -403,3 +403,113 @@ async fn csv_export_includes_workouts() {
     assert!(!csv.contains(":avg_heart_rate") && !csv.contains(",99,"));
     assert_eq!(lines.len(), 1 + 1 + 3);
 }
+
+#[tokio::test]
+async fn manual_goals_http_update_is_user_scoped() {
+    let (app, _db) = app().await;
+    let (admin, sam) = two_users(&app).await;
+
+    let body = json!({
+        "effective_from": "2026-01-01",
+        "move_kcal": 400.0,
+        "exercise_min": 30.0,
+        "stand_hours": 12.0
+    });
+    let (s, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/me/manual-goals",
+        Some(&admin),
+        Some(body),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let id = v["goal"]["id"].as_i64().unwrap();
+    assert_eq!(v["goal"]["move_kcal"], 400.0);
+
+    let (s, v, _) = call(&app, "GET", "/api/v1/me/manual-goals", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(v["goals"].as_array().unwrap().len(), 1);
+
+    let (s, v, _) = call(&app, "GET", "/api/v1/me/manual-goals", Some(&sam), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(v["goals"].as_array().unwrap().is_empty());
+
+    let upd = json!({
+        "effective_from": "2026-01-05",
+        "move_kcal": 500.0,
+        "exercise_min": 35.0,
+        "stand_hours": 10.0
+    });
+    // Owner can update.
+    let (s, v, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/v1/me/manual-goals/{id}"),
+        Some(&admin),
+        Some(upd.clone()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["goal"]["effective_from"], "2026-01-05");
+    assert_eq!(v["goal"]["move_kcal"], 500.0);
+
+    // Other user cannot update (404, not a leak of the row).
+    let (s, v, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/v1/me/manual-goals/{id}"),
+        Some(&sam),
+        Some(upd),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    assert_eq!(v["error"], "not_found");
+
+    // Owner's entry unchanged by the cross-user attempt.
+    let (s, v, _) = call(&app, "GET", "/api/v1/me/manual-goals", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(v["goals"][0]["move_kcal"], 500.0);
+    assert_eq!(v["goals"][0]["effective_from"], "2026-01-05");
+
+    // Validation still applies on update.
+    let (s, v, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/v1/me/manual-goals/{id}"),
+        Some(&admin),
+        Some(json!({
+            "effective_from": "2026-01-05",
+            "move_kcal": null,
+            "exercise_min": null,
+            "stand_hours": null
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"], "invalid_goal");
+
+    // Other user cannot delete either.
+    let (s, v, _) = call(
+        &app,
+        "DELETE",
+        &format!("/api/v1/me/manual-goals/{id}"),
+        Some(&sam),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+
+    let (s, v, _) = call(
+        &app,
+        "DELETE",
+        &format!("/api/v1/me/manual-goals/{id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v, _) = call(&app, "GET", "/api/v1/me/manual-goals", Some(&admin), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(v["goals"].as_array().unwrap().is_empty());
+}

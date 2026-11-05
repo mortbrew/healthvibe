@@ -26,7 +26,10 @@ pub struct SeedOpts {
     pub user_id: i64,
     pub days: i64,
     /// Inclusive end date (local calendar) `YYYY-MM-DD`. Defaults to today
-    /// in the process local timezone (so evenings do not spill into "tomorrow").
+    /// in the process local timezone. The app has no per-user time zone setting;
+    /// readings carry a precomputed `local_start` from import, and the UI's
+    /// "today" is the browser calendar. Seed matches process-local today so
+    /// evenings do not spill into "tomorrow" the way UTC would.
     pub end: Option<String>,
     pub rng_seed: u64,
 }
@@ -53,8 +56,9 @@ pub struct SeedReport {
 fn parse_end(end: &Option<String>) -> anyhow::Result<NaiveDate> {
     match end {
         Some(s) => Ok(NaiveDate::parse_from_str(s, "%Y-%m-%d")?),
-        // Local, not UTC: the UI's "today" is the browser's local calendar day.
-        // Using UTC made evening (US) seeds end on tomorrow in the dashboard.
+        // No stored per-user TZ: use process-local today (not UTC). The UI's
+        // "today" is the browser calendar; UTC made evening (US) seeds land on
+        // tomorrow in the dashboard. See SeedOpts::end docs.
         None => Ok(chrono::Local::now().date_naive()),
     }
 }
@@ -409,6 +413,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Default end is process-local today (there is no per-user time zone).
     async fn seed_default_end_is_local_today_not_past() {
         let db = crate::db::open_memory().await.unwrap();
         let today = chrono::Local::now().date_naive();

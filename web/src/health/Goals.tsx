@@ -159,10 +159,11 @@ export function GoalsPage() {
         {goals.length === 0 && <p className="muted small" style={{ padding: "8px 16px" }}>No goals set yet.</p>}
         {goals.map((g) => (
           <div key={g.id} className="row goals-hist">
-            <button type="button" className="row-label" style={{ background: "none", border: 0, textAlign: "left", cursor: "pointer", flex: 1, color: "inherit", font: "inherit" }} onClick={() => resetForm(g)}>
+            <div className="row-label" style={{ flex: 1 }}>
               <b>{shortDay(g.effective_from)}</b>
               <small className="muted"> · Move {showMove(g.move_kcal, units)} · Exercise {g.exercise_min == null ? "—" : `${Math.round(g.exercise_min)} min`} · Stand {g.stand_hours == null ? "—" : `${Math.round(g.stand_hours)} hrs`}</small>
-            </button>
+            </div>
+            <button type="button" className="linkish" onClick={() => resetForm(g)}>Edit</button>
             <button type="button" className="linkish" onClick={() => void remove(g.id)}>Delete</button>
           </div>
         ))}

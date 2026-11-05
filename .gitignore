@@ -13,3 +13,6 @@ __pycache__/
 target/
 # synthetic test fixtures only (never real data)
 !crates/*/tests/fixtures/*.xml
+
+# TypeScript incremental build info
+*.tsbuildinfo
