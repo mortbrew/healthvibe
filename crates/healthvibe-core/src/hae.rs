@@ -587,6 +587,19 @@ pub async fn ingest(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+
+    // Rich workout rows (parallel to duration readings). Re-sends upsert.
+    if let Ok(v) = serde_json::from_slice::<Value>(body) {
+        let d = v.get("data").unwrap_or(&v);
+        if let Some(Value::Array(ws)) = d.get("workouts") {
+            for w in ws {
+                if let Ok(rw) = crate::workouts::from_hae(w, crate::channel::HEALTH_AUTO_EXPORT) {
+                    crate::workouts::upsert(db, user_id, &rw).await?;
+                }
+            }
+        }
+    }
+
     Ok(Ok(res))
 }
 

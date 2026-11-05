@@ -52,6 +52,7 @@ export default function Summary() {
   const steps = useApi<{ date: string | null; values: number[] }>(hourly(STEPS));
   const dist = useApi<{ date: string | null; values: number[]; unit: string | null }>(hourly(DISTANCE));
   const awards = useApi<{ enabled: boolean; awards: AwardOut[] }>("/awards");
+  const wlist = useApi<{ workouts: import("../api").Workout[] }>("/workouts?limit=5");
   const r = act.data?.rings;
   const metrics = browse.data?.metrics ?? [];
   const workouts = metrics.filter((m) => m.metric.startsWith("HKWorkoutActivityType"));
@@ -88,8 +89,19 @@ export default function Summary() {
           <p className="big num" style={{ color: "var(--distance)" }}>{dist.data ? dv.toFixed(2) : "--"}<small>{du}</small></p>
           <MiniHours values={dist.data?.values ?? Array(24).fill(0)} color="var(--distance)" />
         </Tile>
-        <Tile title="Sessions" to={lastW ? `/browse/metric/${lastW.metric}` : "/browse/activity"}>
-          {lastW ? (
+        <Tile title="Sessions" to={wlist.data?.workouts?.[0] ? `/workouts/${wlist.data.workouts[0].id}` : (lastW ? `/browse/metric/${lastW.metric}` : "/browse/activity")}>
+          {wlist.data?.workouts?.[0] ? (
+            <>
+              <div className="session"><span className="wicon"><WorkoutIcon /></span><span>{prettyWorkout(wlist.data.workouts[0].activity_type)}</span></div>
+              <p className="big num" style={{ color: "var(--exercise)" }}>{Math.round(wlist.data.workouts[0].duration_min ?? 0)}<small>MIN</small></p>
+              <p className="tile-sub">{[
+                wlist.data.workouts[0].avg_hr != null ? `${Math.round(wlist.data.workouts[0].avg_hr)} bpm avg` : null,
+                wlist.data.workouts[0].active_kcal != null ? `${Math.round(wlist.data.workouts[0].active_kcal)} kcal` : null,
+                wlist.data.workouts[0].distance_m != null ? `${(wlist.data.workouts[0].distance_m / 1000).toFixed(2)} km` : null,
+              ].filter(Boolean).join(" · ") || when(wlist.data.workouts[0].local_start ?? wlist.data.workouts[0].start_utc)}</p>
+              <p className="muted small">{(wlist.data.workouts.length >= 5 ? `${totalW.toLocaleString()}+` : totalW.toLocaleString())} sessions recorded</p>
+            </>
+          ) : lastW ? (
             <>
               <div className="session"><span className="wicon"><WorkoutIcon /></span><span>{prettyWorkout(lastW.metric)}</span></div>
               <p className="big num" style={{ color: "var(--exercise)" }}>{Math.round(Number(lastW.latest_value ?? 0))}<small>MIN</small></p>
@@ -466,6 +478,41 @@ export function ActivityCalendar({ date, onClose }: { date: string; onClose: () 
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+
+export function WorkoutDetail({ id }: { id: string }) {
+  const w = useApi<import("../api").Workout>(`/workouts/${id}`);
+  if (w.error) return <div className="page"><p className="muted">Workout not found.</p><Link to="/">Back</Link></div>;
+  if (!w.data) return <div className="page"><p className="muted">Loading…</p></div>;
+  const x = w.data;
+  const km = x.distance_m != null ? x.distance_m / 1000 : null;
+  const zones = [
+    ["Z1", x.zone1_min], ["Z2", x.zone2_min], ["Z3", x.zone3_min], ["Z4", x.zone4_min], ["Z5", x.zone5_min],
+  ].filter(([, v]) => v != null && (v as number) > 0) as [string, number][];
+  return (
+    <div className="page">
+      <LargeTitle title={prettyWorkout(x.activity_type)} eyebrow={(x.local_start ?? x.start_utc).slice(0, 16)} />
+      <div className="card">
+        <dl className="kv">
+          <div><dt>Duration</dt><dd className="num">{x.duration_min != null ? `${Math.round(x.duration_min)} min` : "—"}</dd></div>
+          <div><dt>Active energy</dt><dd className="num">{x.active_kcal != null ? `${Math.round(x.active_kcal)} kcal` : "—"}</dd></div>
+          <div><dt>Total energy</dt><dd className="num">{x.total_kcal != null ? `${Math.round(x.total_kcal)} kcal` : "—"}</dd></div>
+          <div><dt>Distance</dt><dd className="num">{km != null ? `${km.toFixed(2)} km` : "—"}</dd></div>
+          <div><dt>Avg HR</dt><dd className="num">{x.avg_hr != null ? `${Math.round(x.avg_hr)} bpm` : "—"}</dd></div>
+          <div><dt>Max HR</dt><dd className="num">{x.max_hr != null ? `${Math.round(x.max_hr)} bpm` : "—"}</dd></div>
+          <div><dt>Source</dt><dd>{x.source || "—"} <span className="muted">({x.channel})</span></dd></div>
+        </dl>
+        {zones.length > 0 && (
+          <div className="zones">
+            <b>HR zones</b>
+            <ul>{zones.map(([k, v]) => <li key={k}><span>{k}</span><span className="num">{v.toFixed(1)} min</span></li>)}</ul>
+          </div>
+        )}
+      </div>
+      <Link to="/" className="card linkrow">Back to Summary</Link>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { applyTheme, ThemePrefs, watchSystem } from "./theme";
 import { Link, navigate, usePath } from "./router";
 import { ChangePassword, Login, Setup } from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Summary, { ActivityDay, DistanceDetail, StepsDetail } from "./health/Summary";
+import Summary, { ActivityDay, DistanceDetail, StepsDetail, WorkoutDetail } from "./health/Summary";
 import Browse, { AllRecords, BrowseCategory, MetricDetail } from "./health/Browse";
 import Awards from "./health/Awards";
 import Trends, { TrendDetail } from "./health/Trends";
@@ -84,6 +84,7 @@ export default function App() {
   else if (path === "/" || path === "/summary") page = <Summary />;
   else if (path === "/summary/steps") page = <StepsDetail />;
   else if (path === "/summary/distance") page = <DistanceDetail />;
+  else if (seg[0] === "workouts" && seg[1]) page = <WorkoutDetail id={seg[1]} />;
   else if (path === "/summary/trends") page = <Trends />;
   else if (seg[0] === "summary" && seg[1] === "trends" && seg[2]) page = <TrendDetail k={seg[2]} />;
   else if (seg[0] === "activity" && /^\d{4}-\d{2}-\d{2}$/.test(seg[1] ?? "")) page = <ActivityDay date={seg[1]} />;

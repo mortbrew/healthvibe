@@ -57,6 +57,8 @@ pub fn routes() -> Router<AppState> {
         .route("/me/export.csv", get(export_csv))
         .route("/me/data", axum::routing::delete(delete_data))
         .route("/me/sessions/others", axum::routing::delete(revoke_others))
+        .route("/workouts", get(workouts_list))
+        .route("/workouts/{id}", get(workout_one))
         .route("/rings", get(rings))
         .route("/pinned", get(get_pinned).put(put_pinned))
         .route("/dashboards", get(list_dashboards).post(create_dashboard))
@@ -452,6 +454,34 @@ async fn body(State(st): State<AppState>, User(u): User, Query(r): Query<Range>)
     Ok(Json(json!(
         stats::body(&st.db, u.id, &end, r.days(90)).await?
     )))
+}
+
+
+#[derive(Deserialize)]
+struct WorkoutsQuery {
+    limit: Option<i64>,
+    before: Option<String>,
+}
+
+async fn workouts_list(
+    State(st): State<AppState>,
+    User(u): User,
+    Query(q): Query<WorkoutsQuery>,
+) -> ApiResult {
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let rows = healthvibe_core::workouts::list(&st.db, u.id, limit, q.before.as_deref()).await?;
+    Ok(Json(json!({ "workouts": rows })))
+}
+
+async fn workout_one(
+    State(st): State<AppState>,
+    User(u): User,
+    axum::extract::Path(id): axum::extract::Path<i64>,
+) -> ApiResult {
+    match healthvibe_core::workouts::get(&st.db, u.id, id).await? {
+        Some(w) => Ok(Json(json!(w))),
+        None => Err(ApiError(StatusCode::NOT_FOUND, "not_found")),
+    }
 }
 
 // ---- custom dashboards ----------------------------------------------------

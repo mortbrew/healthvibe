@@ -48,6 +48,7 @@ pub struct Goal {
 pub enum Item {
     Row(Row),
     Goal(Goal),
+    Workout(crate::workouts::Workout),
 }
 
 pub const ACTIVITY_SUMMARY: &str = "ActivitySummary";
@@ -73,7 +74,7 @@ pub type Counts = BTreeMap<String, TypeCount>;
 
 /// Apple dates look like `2024-01-02 07:30:00 -0500`.
 /// Returns (UTC RFC3339, original offset, local wall-clock time).
-fn parse_date(s: &str) -> Option<(String, String, String)> {
+pub fn parse_date(s: &str) -> Option<(String, String, String)> {
     let dt = chrono::DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S %z").ok()?;
     let off = s.rsplit(' ').next().unwrap_or("").to_string();
     Some((
@@ -147,16 +148,22 @@ pub fn parse_export<R: BufRead>(
             Event::Start(e) | Event::Empty(e) => {
                 let name = e.name();
                 let a = attrs(&e);
-                let item = if name.as_ref() == b"ActivitySummary" {
-                    to_goal(&a).map(Item::Goal)
-                } else {
-                    to_row(name.as_ref(), &a).map(Item::Row)
-                };
-                if let Some(item) = item {
-                    batch.push(item);
-                    if batch.len() >= BATCH {
-                        sink(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)))?;
+                if name.as_ref() == b"ActivitySummary" {
+                    if let Some(g) = to_goal(&a) {
+                        batch.push(Item::Goal(g));
                     }
+                } else if name.as_ref() == b"Workout" {
+                    if let Some(r) = to_row(name.as_ref(), &a) {
+                        batch.push(Item::Row(r));
+                    }
+                    if let Some(w) = crate::workouts::from_export_attrs(&a, &std::collections::BTreeMap::new()) {
+                        batch.push(Item::Workout(w));
+                    }
+                } else if let Some(r) = to_row(name.as_ref(), &a) {
+                    batch.push(Item::Row(r));
+                }
+                if batch.len() >= BATCH {
+                    sink(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)))?;
                 }
             }
             Event::Eof => break,
@@ -196,6 +203,65 @@ async fn insert_batch(
     let mut tx = db.begin().await?;
     for item in items {
         let r = match item {
+            Item::Workout(w) => {
+                let res = sqlx::query(
+                    "INSERT INTO workouts
+                     (user_id, activity_type, channel, source, start_utc, end_utc, local_start, local_end,
+                      duration_min, avg_hr, max_hr, active_kcal, total_kcal, distance_m, elevation_m,
+                      zone1_min, zone2_min, zone3_min, zone4_min, zone5_min, detail_json, external_id)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     ON CONFLICT (user_id, channel, source, start_utc, end_utc, activity_type) DO UPDATE SET
+                       duration_min = excluded.duration_min, avg_hr = excluded.avg_hr, max_hr = excluded.max_hr,
+                       active_kcal = excluded.active_kcal, total_kcal = excluded.total_kcal,
+                       distance_m = excluded.distance_m, elevation_m = excluded.elevation_m,
+                       zone1_min = excluded.zone1_min, zone2_min = excluded.zone2_min,
+                       zone3_min = excluded.zone3_min, zone4_min = excluded.zone4_min,
+                       zone5_min = excluded.zone5_min, detail_json = excluded.detail_json,
+                       external_id = COALESCE(excluded.external_id, workouts.external_id),
+                       local_start = excluded.local_start, local_end = excluded.local_end
+                     WHERE duration_min IS NOT excluded.duration_min
+                        OR avg_hr IS NOT excluded.avg_hr
+                        OR max_hr IS NOT excluded.max_hr
+                        OR active_kcal IS NOT excluded.active_kcal
+                        OR total_kcal IS NOT excluded.total_kcal
+                        OR distance_m IS NOT excluded.distance_m
+                        OR elevation_m IS NOT excluded.elevation_m
+                        OR detail_json IS NOT excluded.detail_json
+                        OR local_start IS NOT excluded.local_start
+                        OR local_end IS NOT excluded.local_end",
+                )
+                .bind(user_id)
+                .bind(&w.activity_type)
+                .bind(&w.channel)
+                .bind(&w.source)
+                .bind(&w.start_utc)
+                .bind(&w.end_utc)
+                .bind(&w.local_start)
+                .bind(&w.local_end)
+                .bind(w.duration_min)
+                .bind(w.avg_hr)
+                .bind(w.max_hr)
+                .bind(w.active_kcal)
+                .bind(w.total_kcal)
+                .bind(w.distance_m)
+                .bind(w.elevation_m)
+                .bind(w.zone1_min)
+                .bind(w.zone2_min)
+                .bind(w.zone3_min)
+                .bind(w.zone4_min)
+                .bind(w.zone5_min)
+                .bind(&w.detail_json)
+                .bind(&w.external_id)
+                .execute(&mut *tx)
+                .await?;
+                let c = counts.entry(w.activity_type.clone()).or_default();
+                if res.rows_affected() == 1 {
+                    c.inserted += 1;
+                } else {
+                    c.duplicates += 1;
+                }
+                continue;
+            }
             Item::Row(r) => r,
             Item::Goal(g) => {
                 let res = sqlx::query(
