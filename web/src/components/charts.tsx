@@ -470,8 +470,8 @@ export function VitalRangeBars(props: {
 }
 
 /**
- * Weekly Highlights average: gray day bars with a purple average line,
- * matching Apple Health. The big duration sits left of the bars.
+ * Weekly Highlights average: purple day bars with a white mean line so the
+ * average stays visible across the bars. The duration sits left of the bars.
  * Yearly comparison is not drawn here.
  */
 export function AvgAsleepBars(props: { nights: { date: string; asleep_min: number }[]; avg: number; height?: number }) {

@@ -557,7 +557,7 @@ body:has(.sheet-backdrop), body:has(.fullsheet) { overflow: hidden; touch-action
 }
 .hl-head { display: flex; align-items: center; gap: .4rem; font-weight: 600; margin: 0 0 .35rem; }
 .hl-card p { margin: .25rem 0 .5rem; line-height: 1.35; }
-.avg-sleep { position: relative; --avg-line: #707bf6; --avg-bar: #48484a; margin-top: .2rem; }
+.avg-sleep { position: relative; --avg-line: #ffffff; --avg-bar: #707bf6; margin-top: .2rem; }
 .avg-kicker {
   position: absolute; left: 0; width: 40%; margin: 0; z-index: 3; pointer-events: none;
   color: var(--muted); font-size: .78rem; font-weight: 600; line-height: 1.15;
