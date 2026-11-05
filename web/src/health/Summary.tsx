@@ -162,7 +162,7 @@ function ActivityPinCard({ r }: { r: Activity["rings"] | null }) {
           <div><span className="as-label" style={{ color: "var(--exercise)" }}>Exercise</span><span className="num">{r ? `${n0(r.exercise_min)} min` : "--"}</span></div>
           <div><span className="as-label" style={{ color: "var(--stand)" }}>Stand</span><span className="num">{r ? `${n0(r.stand_hours)} hr` : "--"}</span></div>
         </div>
-        <FitRings v={r ? ringsOf(r) : null} size={56} />
+        <FitRings v={r ? ringsOf(r) : null} size={56} replayKey={r?.date ?? "activity"} />
       </div>
     </Link>
   );
@@ -314,12 +314,12 @@ export function ActivityDay({ date }: { date: string }) {
           return (
             <Link key={d} to={`/activity/${d}`} className={d === date ? "wd on" : "wd"}>
               <span className={d === today() ? "wl today" : "wl"}>{"MTWTFSS"[i]}</span>
-              <FitRings v={rd && !future ? ringsOf(rd) : null} size={34} dim={future} />
+              <FitRings v={rd && !future ? ringsOf(rd) : null} size={34} dim={future} replayKey={d} />
             </Link>
           );
         })}
       </div>
-      <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} /></div>
+      <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} replayKey={date} /></div>
       {r && <GoalFrom r={r} className="center" />}
       {(r || date === today()) && <p className="muted small center"><Link to="/account/goals">{noGoals(r) ? "Set goals" : "Edit goals"}</Link></p>}
       <div className="act-charts">
@@ -415,7 +415,7 @@ export function ActivityCalendar({ date, onClose }: { date: string; onClose: () 
                   <button key={d} className="cal-day" onClick={() => { onClose(); navigate(`/activity/${d}`); }} aria-label={d}>
                     {i === 0 && <span className="cal-mname">{new Date(d + "T12:00:00").toLocaleDateString([], { month: "short" })}</span>}
                     <span className={d === today() ? "cal-num today" : "cal-num"}>{Number(d.slice(8))}</span>
-                    <FitRings v={rd && !future ? ringsOf(rd) : null} size={38} dim={future || !rd} />
+                    <FitRings v={rd && !future ? ringsOf(rd) : null} size={38} dim={future || !rd} replayKey={d} />
                     <i className={rd?.workout ? "wdot on" : "wdot"} />
                   </button>
                 );

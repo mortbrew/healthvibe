@@ -3,53 +3,59 @@
 
 import { useId } from "react";
 import { DayValue } from "../api";
+import { ringFraction, ringLaps } from "../health/ring-motion";
+import { useRingMotion } from "../health/use-ring-motion";
 
-/** One ring. With no goal (none in the imported data) only the track is drawn. */
-export function Ring(props: { value: number; goal: number | null; color: string; r: number; width: number }) {
+/** One ring stroke. `progress` may exceed 1; the extra lap is the overlap, not a 100% cap. */
+export function Ring(props: { progress: number; color: string; r: number; width: number }) {
   const c = 2 * Math.PI * props.r;
-  const frac = props.goal != null && props.goal > 0 ? props.value / props.goal : 0;
-  const shown = Math.min(frac, 1);
+  const { base, extra } = ringLaps(props.progress);
+  const dash = (portion: number) => `${Math.max(0, portion) * c} ${c}`;
   return (
     <g>
       <circle r={props.r} fill="none" stroke={props.color} strokeOpacity={0.2} strokeWidth={props.width} />
-      {shown > 0 && (
+      {base > 0 && (
         <circle
           r={props.r}
           fill="none"
           stroke={props.color}
           strokeWidth={props.width}
           strokeLinecap="round"
-          strokeDasharray={`${c * shown} ${c}`}
+          strokeDasharray={dash(base)}
           transform="rotate(-90)"
         />
       )}
-      {frac > 1 && (
-        // Overlap marker for goals exceeded, like Apple's second lap.
+      {extra > 0 && (
         <circle
           r={props.r}
           fill="none"
           stroke={props.color}
           strokeWidth={props.width}
           strokeLinecap="round"
-          strokeDasharray={`${c * Math.min(frac - 1, 1)} ${c}`}
+          strokeDasharray={dash(extra)}
           transform="rotate(-90)"
-          style={{ filter: "brightness(1.25)" }}
+          style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,.45)) brightness(1.12)" }}
         />
       )}
     </g>
   );
 }
 
-export function Rings(props: { move: [number, number | null]; exercise: [number, number | null]; stand: [number, number | null]; size?: number }) {
+export function Rings(props: { move: [number, number | null]; exercise: [number, number | null]; stand: [number, number | null]; size?: number; replayKey?: string }) {
   const size = props.size ?? 180;
   const w = size * 0.11;
   const gap = w * 1.12;
   const r0 = size / 2 - w / 2 - 2;
+  const shown = useRingMotion([
+    ringFraction(props.move[0], props.move[1]),
+    ringFraction(props.exercise[0], props.exercise[1]),
+    ringFraction(props.stand[0], props.stand[1]),
+  ], props.replayKey ?? "");
   return (
-    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label="Activity rings">
-      <Ring value={props.move[0]} goal={props.move[1]} color="var(--move)" r={r0} width={w} />
-      <Ring value={props.exercise[0]} goal={props.exercise[1]} color="var(--exercise)" r={r0 - gap} width={w} />
-      <Ring value={props.stand[0]} goal={props.stand[1]} color="var(--stand)" r={r0 - 2 * gap} width={w} />
+    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label="Activity rings" data-ring-progress={shown.map((n) => n.toFixed(3)).join(",")}>
+      <Ring progress={shown[0] ?? 0} color="var(--move)" r={r0} width={w} />
+      <Ring progress={shown[1] ?? 0} color="var(--exercise)" r={r0 - gap} width={w} />
+      <Ring progress={shown[2] ?? 0} color="var(--stand)" r={r0 - 2 * gap} width={w} />
     </svg>
   );
 }

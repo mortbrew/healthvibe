@@ -30,10 +30,19 @@ export function RoundBtn({ label, onClick, children, disabled }: { label: string
   return <button className="roundbtn" aria-label={label} title={label} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 
-export const BackIcon = () => <svg width="11" height="18" viewBox="0 0 11 18" aria-hidden><path d="M9 2 2 9l7 7" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-export const XIcon = () => <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><path d="M2 2l10 10M12 2 2 12" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>;
-export const CheckIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><path d="M3 8.5 6.5 12 13 4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-export const CalIcon = () => <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden><rect x="2" y="3.5" width="14" height="12.5" rx="3" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M2 7.5h14M6 2v3M12 2v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
+/** Square icon box. Glyphs are centered in the viewBox so a centered button stays centered. */
+function Glyph({ children }: { children: React.ReactNode }) {
+  return <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden focusable="false">{children}</svg>;
+}
+export const BackIcon = () => <Glyph><path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></Glyph>;
+export const XIcon = () => <Glyph><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" /></Glyph>;
+export const CheckIcon = () => <Glyph><path d="M6 12.5 10.2 16.5 18 8" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></Glyph>;
+export const CalIcon = () => (
+  <Glyph>
+    <rect x="4.5" y="6" width="15" height="14" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    <path d="M4.5 10.5h15M8 3.8v4.2M16 3.8v4.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+  </Glyph>
+);
 
 export function back(fallback: string) {
   if (history.length > 1 && document.referrer !== "" ) history.back();

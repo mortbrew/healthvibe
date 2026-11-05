@@ -1,24 +1,34 @@
-// Fitness-style activity rings (original drawing): thick round caps, dim track, arrows at 12 o'clock.
+// Fitness-style activity rings: thick round caps, dim track, arrow on the leading tip.
 // A goal is that day's export ActivitySummary value, else the latest earlier export or
 // manual goal per ring (see server RingGoals). Before the first goal it is null: the ring then shows only its track. Never a default.
+import { useId } from "react";
+import { ringFraction, ringLaps, tipTurns } from "./ring-motion";
+import { useRingMotion } from "./use-ring-motion";
+
 export type RingVals = { move: [number, number | null]; exercise: [number, number | null]; stand: [number, number | null] };
 
-function One({ r, w, frac, color, arrow, dim }: { r: number; w: number; frac: number; color: string; arrow?: number; dim?: boolean }) {
+function One({ r, w, progress, color, arrow, dim, gid }: { r: number; w: number; progress: number; color: string; arrow?: number; dim?: boolean; gid: string }) {
   const c = 2 * Math.PI * r;
-  const f = Math.max(0, frac);
+  const { base, extra } = ringLaps(progress);
+  const turns = tipTurns(progress);
+  const rad = turns * Math.PI * 2;
+  const deg = turns * 360;
+  const tipX = Math.sin(rad) * r;
+  const tipY = -Math.cos(rad) * r;
+  const dash = (portion: number) => `${Math.max(0, portion) * c} ${c}`;
   return (
     <g>
       <circle r={r} fill="none" stroke={color} strokeOpacity={dim ? 0.12 : 0.22} strokeWidth={w} />
-      {f > 0 && (
-        <circle r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round"
-          strokeDasharray={`${c * Math.min(f, 1)} ${c}`} transform="rotate(-90)" />
+      {base > 0 && (
+        <circle r={r} fill="none" stroke={`url(#${gid})`} strokeWidth={w} strokeLinecap="round" strokeOpacity={dim ? 0.55 : 1}
+          strokeDasharray={dash(base)} transform="rotate(-90)" />
       )}
-      {f > 1 && (
-        <circle r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round"
-          strokeDasharray={`${c * Math.min(f - 1, 0.999)} ${c}`} transform="rotate(-90)" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,.6)) brightness(1.15)" }} />
+      {extra > 0 && (
+        <circle r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round" strokeOpacity={dim ? 0.7 : 1}
+          strokeDasharray={dash(extra)} transform="rotate(-90)" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,.55)) brightness(1.12)" }} />
       )}
-      {arrow !== undefined && w >= 10 && (
-        <g transform={`translate(${w * 0.05},${-r})`} stroke="#000" strokeWidth={w * 0.13} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {arrow !== undefined && w >= 10 && progress > 0.02 && (
+        <g transform={`translate(${tipX} ${tipY}) rotate(${deg})`} stroke="#000" strokeWidth={w * 0.13} fill="none" strokeLinecap="round" strokeLinejoin="round">
           {arrow === 0 && <path d={`M${-w * 0.22} 0h${w * 0.44}m${-w * 0.18} ${-w * 0.18}l${w * 0.18} ${w * 0.18}l${-w * 0.18} ${w * 0.18}`} />}
           {arrow === 1 && <path d={`M${-w * 0.28} ${-w * 0.18}l${w * 0.18} ${w * 0.18}l${-w * 0.18} ${w * 0.18}M${w * 0.02} ${-w * 0.18}l${w * 0.18} ${w * 0.18}l${-w * 0.18} ${w * 0.18}`} />}
           {arrow === 2 && <path d={`M0 ${w * 0.24}v${-w * 0.46}m${-w * 0.18} ${w * 0.18}l${w * 0.18} ${-w * 0.18}l${w * 0.18} ${w * 0.18}`} />}
@@ -28,15 +38,35 @@ function One({ r, w, frac, color, arrow, dim }: { r: number; w: number; frac: nu
   );
 }
 
-export function FitRings({ v, size = 140, dim, label }: { v: RingVals | null; size?: number; dim?: boolean; label?: string }) {
+export function FitRings({ v, size = 140, dim, label, replayKey = "" }: { v: RingVals | null; size?: number; dim?: boolean; label?: string; replayKey?: string }) {
+  const uid = useId().replace(/:/g, "");
   const w = size * 0.115, g = size * 0.012;
   const r1 = size / 2 - w / 2, r2 = r1 - w - g, r3 = r2 - w - g;
-  const f = (p?: [number, number | null]) => (p && p[1] != null && p[1] > 0 ? p[0] / p[1] : 0);
+  const targets = [
+    ringFraction(v?.move[0] ?? 0, v?.move[1]),
+    ringFraction(v?.exercise[0] ?? 0, v?.exercise[1]),
+    ringFraction(v?.stand[0] ?? 0, v?.stand[1]),
+  ];
+  const shown = useRingMotion(targets, replayKey);
+  const rings = [
+    { r: r1, progress: shown[0] ?? 0, color: "var(--move)", arrow: 0 },
+    { r: r2, progress: shown[1] ?? 0, color: "var(--exercise)", arrow: 1 },
+    { r: r3, progress: shown[2] ?? 0, color: "var(--stand)", arrow: 2 },
+  ];
   return (
-    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label={label ?? "Activity rings"} className="fitrings">
-      <One r={r1} w={w} frac={f(v?.move)} color="var(--move)" arrow={0} dim={dim} />
-      <One r={r2} w={w} frac={f(v?.exercise)} color="var(--exercise)" arrow={1} dim={dim} />
-      <One r={r3} w={w} frac={f(v?.stand)} color="var(--stand)" arrow={2} dim={dim} />
+    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label={label ?? "Activity rings"} className="fitrings" data-ring-progress={shown.map((n) => n.toFixed(3)).join(",")}>
+      <defs>
+        {rings.map((ring, i) => (
+          <linearGradient key={i} id={`${uid}-g${i}`} gradientUnits="userSpaceOnUse" x1={-ring.r} y1={-ring.r} x2={ring.r} y2={ring.r}>
+            <stop offset="0%" stopColor={ring.color} stopOpacity="0.82" />
+            <stop offset="45%" stopColor={ring.color} />
+            <stop offset="100%" stopColor={ring.color} stopOpacity="0.9" />
+          </linearGradient>
+        ))}
+      </defs>
+      {rings.map((ring, i) => (
+        <One key={i} r={ring.r} w={w} progress={ring.progress} color={ring.color} arrow={ring.arrow} dim={dim} gid={`${uid}-g${i}`} />
+      ))}
     </svg>
   );
 }

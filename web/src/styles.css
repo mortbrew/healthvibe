@@ -217,10 +217,11 @@ input.copyval { font: inherit; font-family: ui-monospace, monospace; font-size: 
 .navbar { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: .5rem; margin: .25rem 0 1rem; min-height: 44px; }
 .nb-title { text-align: center; display: flex; flex-direction: column; line-height: 1.2; }
 .nb-right { display: flex; gap: .5rem; justify-content: flex-end; min-width: 44px; }
-.roundbtn { width: 38px; height: 38px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+.roundbtn { width: 38px; height: 38px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; cursor: pointer;
   background: color-mix(in srgb, var(--surface-2) 72%, transparent); color: var(--text);
   -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4);
   box-shadow: inset 0 0 0 0.5px color-mix(in srgb, #fff 18%, transparent); }
+.roundbtn svg { display: block; }
 .roundbtn:disabled { opacity: .4; cursor: default; }
 .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 1.6rem 0 .6rem; }
 .sec-head h2, section > h2 { font-size: 1.3rem; font-weight: 750; margin: 0; }
