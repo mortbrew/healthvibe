@@ -395,3 +395,43 @@ async fn privacy_export_delete_and_sessions() {
         200
     );
 }
+
+#[tokio::test]
+async fn csv_export_includes_workouts() {
+    let (app, db) = app().await;
+    let (admin, _sam) = two_users(&app).await;
+    reading(&db, 1, ENERGY, "10", "2026-01-05", 0).await;
+    for (uid, dur) in [(1, 30.0), (2, 99.0)] {
+        sqlx::query(
+            "INSERT INTO workouts (user_id, channel, source, start_utc, end_utc, activity_type, duration_min, distance_m)
+             VALUES (?, 'export_xml', 'Synthetic', '2026-01-01T10:00:00Z', '2026-01-01T10:30:00Z', 'HKWorkoutActivityTypeRunning', ?, 5000)",
+        )
+        .bind(uid)
+        .bind(dur)
+        .execute(&db)
+        .await
+        .unwrap();
+    }
+    let req = Request::builder()
+        .uri("/api/v1/me/export.csv")
+        .header(header::COOKIE, &admin)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let csv = String::from_utf8(
+        axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    let lines: Vec<&str> = csv.lines().collect();
+    assert_eq!(lines[0], "type,value,unit,start_utc,end_utc,source");
+    let w = "2026-01-01T10:00:00Z,2026-01-01T10:30:00Z,Synthetic";
+    assert!(lines.contains(&format!("Workout:HKWorkoutActivityTypeRunning,,,{w}").as_str()));
+    assert!(lines.contains(&format!("Workout:HKWorkoutActivityTypeRunning:duration,30,min,{w}").as_str()));
+    assert!(lines.contains(&format!("Workout:HKWorkoutActivityTypeRunning:distance,5000,m,{w}").as_str()));
+    // Absent values get no row; other users' workouts are not included.
+    assert!(!csv.contains(":avg_heart_rate") && !csv.contains(",99,"));
+    assert_eq!(lines.len(), 1 + 1 + 3);
+}

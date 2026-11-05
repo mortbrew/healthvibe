@@ -848,6 +848,53 @@ async fn export_csv(State(st): State<AppState>, User(u): User) -> ApiResult<Resp
         out.push_str(&f.iter().map(|x| csv_field(x)).collect::<Vec<_>>().join(","));
         out.push('\n');
     }
+    // Workouts, in the same columns: a `Workout:<activity type>` row, then one
+    // `Workout:<activity type>:<field>` row per stored value. Only values as
+    // imported; nothing is computed here.
+    type W = (
+        String,
+        String,
+        String,
+        String,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+    );
+    let workouts: Vec<W> = sqlx::query_as(
+        "SELECT activity_type, start_utc, end_utc, source, duration_min, active_kcal, total_kcal,
+                distance_m, elevation_m, avg_hr, max_hr
+         FROM workouts WHERE user_id = ? ORDER BY start_utc",
+    )
+    .bind(u.id)
+    .fetch_all(&st.db)
+    .await?;
+    for w in workouts {
+        let kind = format!("Workout:{}", w.0);
+        let fields = [
+            ("duration", w.4, "min"),
+            ("active_energy", w.5, "kcal"),
+            ("total_energy", w.6, "kcal"),
+            ("distance", w.7, "m"),
+            ("elevation", w.8, "m"),
+            ("avg_heart_rate", w.9, "count/min"),
+            ("max_heart_rate", w.10, "count/min"),
+        ];
+        let mut row = |ty: &str, value: String, unit: &str| {
+            let f = [ty, &value, unit, &w.1, &w.2, &w.3];
+            out.push_str(&f.iter().map(|x| csv_field(x)).collect::<Vec<_>>().join(","));
+            out.push('\n');
+        };
+        row(&kind, String::new(), "");
+        for (name, v, unit) in fields {
+            if let Some(v) = v {
+                row(&format!("{kind}:{name}"), v.to_string(), unit);
+            }
+        }
+    }
     Ok((
         [
             (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
