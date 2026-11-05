@@ -45,15 +45,21 @@ in the same database, tagged with the channel they came from
    `multipart/form-data` POST to `/api/v1/import`, authenticated by your
    session cookie.
 3. The server streams the upload to a randomly named file in the staging dir
-   (`upload-<random>.zip`). There is no upload size limit, because full
-   exports can exceed 1 GB.
+   (`upload-<random>.zip`). Uploads larger than `HEALTHVIBE_MAX_IMPORT_BYTES`
+   (default 4 GiB) are refused with `413 upload_too_large`: early from the
+   announced `Content-Length` when there is one, otherwise as soon as the
+   streamed bytes pass the limit, and the partial file is deleted. Your
+   reverse proxy may enforce its own, smaller limit.
 4. A background job reads `export.xml` from the zip and writes records,
    workouts (with their statistics, events, metadata and route file names)
    and Activity ring goals to the database.
 5. The staged zip is deleted when the job finishes, whether it succeeded or
-   failed. **Limit:** if the process is killed mid-import, the zip stays in
-   the staging dir until you delete it. There is no clean-up on startup yet.
-   The deletion is a normal file delete, not a secure wipe.
+   failed. If the process is killed mid-import, the zip stays in the staging
+   dir until the next start: on startup healthvibe deletes leftover
+   `upload-*`, `*.tmp` and `*.part` files directly in the staging dir (regular
+   files only; it does not follow links or descend into folders) and marks
+   imports that were still running as failed. The deletion is a normal file
+   delete, not a secure wipe.
 
 GPS route files (`workout-routes/*.gpx`) inside the zip are **not** imported.
 Only their file names are kept, as part of a workout's details. Clinical
@@ -124,14 +130,24 @@ features it has are outside healthvibe's control. Check its privacy policy.
 - Session cookies carry the `Secure` flag unless you set
   `HEALTHVIBE_ALLOW_HTTP=true`. That setting is for local testing over plain
   HTTP only; never use it on a public address.
+- **Trusted proxies.** `HEALTHVIBE_TRUSTED_PROXIES` is a comma-separated list
+  of IPs or CIDR blocks (for example `172.16.0.0/12`) for your reverse proxy.
+  `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Host` and `X-Forwarded-Proto`
+  are believed **only** when the TCP peer is in that list; from anyone else
+  they are ignored. The list is empty by default, so out of the box no
+  forwarding header is believed. An invalid entry stops the server from
+  starting.
 - Rate limits that key on client IP (login, setup-code claim and handoff
-  claim) use the **last** `X-Forwarded-For` value, else the TCP peer. This is
-  only trustworthy when a proxy that appends that header sits in front. If
-  healthvibe is exposed directly, a client can set the header and dodge the
-  per-IP limits. The per-account lockout (section 5) still applies.
+  claim) use the client address worked out like this: from a trusted peer,
+  the right-most `X-Forwarded-For` hop that is not itself a trusted proxy
+  (entries further left were supplied by the client and are ignored), else
+  `X-Real-IP`, else the peer; from any other peer, the peer itself. If you run
+  behind a proxy but leave the list empty, every visitor shares the proxy's
+  address for these limits. The per-account lockout (section 5) still applies.
 - When `HEALTHVIBE_PUBLIC_URL` is unset, the setup QR codes are built from the
-  `X-Forwarded-Host`/`Host` and `X-Forwarded-Proto` headers of your own
-  request. Set `HEALTHVIBE_PUBLIC_URL` so the address never depends on headers.
+  `Host` header of your own request, or from `X-Forwarded-Host` and
+  `X-Forwarded-Proto` when the request came through a trusted proxy. Set
+  `HEALTHVIBE_PUBLIC_URL` so the address never depends on headers.
 - The rate-limit counters are in memory and reset when the server restarts.
 
 ## 4. Storage at rest
@@ -143,8 +159,8 @@ features it has are outside healthvibe's control. Check its privacy policy.
 | Health samples: steps, heart rate, sleep, body measurements etc., with source device names and time zone | `readings` | **Plain text, not encrypted** |
 | Workouts and their raw details (statistics, events, metadata, route file names) | `workouts` | **Plain text** |
 | Activity ring goals | `activity_goals` | **Plain text** |
-| Profile: display name, birth date, sex, height, wheelchair use, avatar settings, units, goal overrides | `profiles` | **Plain text** |
-| Awards, pinned metrics, dashboards, theme | various | Plain text |
+| Profile: display name, birth date, sex, height, wheelchair use, avatar settings, units | `profiles` | **Plain text** |
+| Apple Fitness awards you marked as earned, pinned metrics, dashboards, theme | various | Plain text |
 | Failed Shortcut upload bodies, for up to 24 h | `ingest_raw` | **Plain text** |
 | Import history (counts per type, errors) | `import_jobs` | Plain text |
 | Usernames (which may be email addresses), admin flag | `users` | Plain text |
@@ -207,7 +223,7 @@ JSON parse error near some text). Treat logs as sensitive.
   until the user changes it.
 - **Login protection:** 5 failed attempts on a username locks it for 15
   minutes. Attempts on unknown names are counted too. There is also a per-IP
-  limit of 60 login attempts per 10 minutes (see the caveat in section 3).
+  limit of 60 login attempts per 10 minutes (see trusted proxies in section 3).
 - **Sessions:** a random 32-byte token in a cookie that is `HttpOnly`,
   `SameSite=Strict` and `Secure` (unless allow-http), valid for 30 days.
   Only the token's hash is stored. You can sign out other sessions.
@@ -229,8 +245,8 @@ JSON parse error near some text). Treat logs as sensitive.
 
 ## 6. MCP (read-only AI tool access): **planned**
 
-The README mentions a read-only MCP server. **It is not built.** There is no
-MCP endpoint and no MCP token in the code today. Planned shape: a separate,
+A read-only MCP server is **planned and not built** (the README says so too).
+There is no MCP endpoint and no MCP token in the code today. Planned shape: a separate,
 read-only, per-user token that can query only that user's data and can be
 revoked independently. When it ships, anything an MCP client reads leaves the
 server for wherever that client (and any AI model behind it) sends it.
@@ -254,15 +270,37 @@ where provider keys are stored (planned: encrypted under the per-user key, see
   deliberately persisted in browser storage, but it lives in page memory and
   may sit in the browser's normal HTTP cache. Use a private window on shared
   computers and sign out afterwards.
-- "Export CSV" downloads your readings (not yet workouts) as a plain-text
-  file. Once downloaded it is outside healthvibe's protection.
+- "Export CSV" downloads your readings and workouts as a plain-text file
+  (columns `type,value,unit,start_utc,end_utc,source`; each workout is a
+  `Workout:<type>` row plus one `Workout:<type>:<field>` row per stored
+  value). Once downloaded it is outside healthvibe's protection.
 - "Delete all my health data" removes your readings, workouts, ring goals,
-  pending raw uploads, sync cursors, awards and pinned metrics. It keeps your
-  account, profile, dashboards and paired device. Copies in backups, WAL or
-  disk snapshots are not touched.
-- The server does not yet send security headers such as
-  `Content-Security-Policy`, `X-Frame-Options`/`frame-ancestors`, `HSTS` or
-  `Referrer-Policy`. Add them at your reverse proxy (section 9).
+  pending raw uploads, sync cursors, marked Apple awards and pinned metrics.
+  It keeps your account, profile, dashboards and paired device. Copies in
+  backups, WAL or disk snapshots are not touched.
+- Every response carries security headers:
+  - `Content-Security-Policy: default-src 'self'; script-src 'self';
+    style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:;
+    connect-src 'self'; object-src 'none'; base-uri 'self';
+    form-action 'self'; frame-ancestors 'none'` (no inline or eval'd script);
+  - `X-Content-Type-Options: nosniff`;
+  - `Referrer-Policy: no-referrer`;
+  - `X-Frame-Options: DENY`;
+  - `Permissions-Policy` turning off camera, microphone, geolocation, payment
+    and USB;
+  - `Cross-Origin-Opener-Policy: same-origin`.
+  `Strict-Transport-Security` is sent only when `HEALTHVIBE_HSTS_MAX_AGE` is
+  set (seconds); turn it on once HTTPS works for the hostname, or let your
+  proxy send it instead.
+
+### 8.1 What healthvibe shows
+
+healthvibe shows only what was imported, plus daily totals and unit
+conversions. It does not work out heart-rate zones, workout heart-rate
+averages from samples, sleep sessions or naps, awards or streaks, or default
+or carried-forward ring goals. Sleep is shown as the raw stage samples, each
+counted on the local date its sample **ends**. A day without an imported
+ring goal shows no goal.
 
 ## 9. Threat model
 
@@ -280,23 +318,26 @@ where provider keys are stored (planned: encrypted under the per-user key, see
 | A stolen or discarded server disk | Only with host disk encryption | healthvibe does not encrypt. |
 | A leaked backup | **No**, unless you encrypt backups | Backups contain everything. |
 | Offline password guessing from a leaked database | Slowed | argon2id with salt, but weak passwords can still fall. |
-| A malicious export.zip or upload | Mostly | Streaming XML parser, size limits on JSON uploads, user-scoped writes. The export upload itself has no size cap, so disk can fill. |
+| A malicious export.zip or upload | Mostly | Streaming XML parser, size limits on all uploads (export zips: `HEALTHVIBE_MAX_IMPORT_BYTES`, default 4 GiB), user-scoped writes, leftovers cleaned on startup. Several large uploads at once can still fill the staging disk. |
+| A client forging its IP or host via `X-Forwarded-*` | Yes | Those headers count only from `HEALTHVIBE_TRUSTED_PROXIES`. |
+| The app being framed (clickjacking) or loading injected script | Yes | `frame-ancestors 'none'`, `X-Frame-Options: DENY`, a CSP without inline script. |
 | Data sent to third parties | No such flows today | No telemetry, no AI, no outbound calls with data. |
 | A compromised third-party iPhone app (Health Auto Export) | Out of scope | It sees your data on the phone by design. |
 
 ## 10. Recommendations for self-hosters
 
 1. Put healthvibe behind a reverse proxy that serves **HTTPS only**. Redirect
-   HTTP and enable HSTS. Do not publish port 8000 to the internet or LAN.
+   HTTP, and enable HSTS (at the proxy, or with `HEALTHVIBE_HSTS_MAX_AGE`).
+   Do not publish port 8000 to the internet or LAN.
 2. Set `HEALTHVIBE_PUBLIC_URL`, and leave `HEALTHVIBE_ALLOW_HTTP` unset (false).
-3. Make sure your proxy appends a correct `X-Forwarded-For`, and that clients
+3. Set `HEALTHVIBE_TRUSTED_PROXIES` to your proxy's address or network, make
+   sure the proxy appends a correct `X-Forwarded-For`, and make sure clients
    cannot reach healthvibe except through it.
 4. Finish the first-run admin setup before the address is reachable by others.
-5. At the proxy, add security headers: a strict `Content-Security-Policy`
-   (`default-src 'self'`), `frame-ancestors 'none'`,
-   `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff`.
-   Consider putting the whole site behind your own SSO or VPN as an extra
-   layer.
+5. healthvibe sends its own security headers (section 8). If your proxy adds
+   headers too, don't loosen the CSP. Consider putting the whole site behind
+   your own SSO or VPN as an extra layer. Set `HEALTHVIBE_MAX_IMPORT_BYTES`
+   to suit your export size and staging disk.
 6. Use full-disk or volume encryption on the host, and restrict who has shell,
    Docker or root access. Everyone with that access can read all health data.
 7. Keep `./appdata` owned by the container user and not readable by others
@@ -304,7 +345,8 @@ where provider keys are stored (planned: encrypted under the per-user key, see
 8. Back up with SQLite's online backup or with the container stopped.
    **Encrypt** backups (for example with `age` or `restic`) and keep the key
    separate from the backup.
-9. After a crash during an import, delete leftovers in `./appdata/staging`.
+9. Leftover uploads in `./appdata/staging` are deleted on the next start;
+   restart healthvibe after a crash during an import.
 10. Treat container logs as sensitive and keep retention short.
 11. Use long, unique passwords, revoke upload tokens for phones you no longer
     use, and use "sign out other sessions" if a device is lost.
