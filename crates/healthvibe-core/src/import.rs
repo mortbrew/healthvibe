@@ -279,15 +279,13 @@ async fn insert_batch(
                     "INSERT INTO workouts
                      (user_id, activity_type, channel, source, start_utc, end_utc, local_start, local_end,
                       duration_min, avg_hr, max_hr, active_kcal, total_kcal, distance_m, elevation_m,
-                      zone1_min, zone2_min, zone3_min, zone4_min, zone5_min, detail_json, external_id)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                      detail_json, external_id)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                      ON CONFLICT (user_id, channel, source, start_utc, end_utc, activity_type) DO UPDATE SET
                        duration_min = excluded.duration_min, avg_hr = excluded.avg_hr, max_hr = excluded.max_hr,
                        active_kcal = excluded.active_kcal, total_kcal = excluded.total_kcal,
                        distance_m = excluded.distance_m, elevation_m = excluded.elevation_m,
-                       zone1_min = excluded.zone1_min, zone2_min = excluded.zone2_min,
-                       zone3_min = excluded.zone3_min, zone4_min = excluded.zone4_min,
-                       zone5_min = excluded.zone5_min, detail_json = excluded.detail_json,
+                       detail_json = excluded.detail_json,
                        external_id = COALESCE(excluded.external_id, workouts.external_id),
                        local_start = excluded.local_start, local_end = excluded.local_end
                      WHERE duration_min IS NOT excluded.duration_min
@@ -316,11 +314,6 @@ async fn insert_batch(
                 .bind(w.total_kcal)
                 .bind(w.distance_m)
                 .bind(w.elevation_m)
-                .bind(w.zone1_min)
-                .bind(w.zone2_min)
-                .bind(w.zone3_min)
-                .bind(w.zone4_min)
-                .bind(w.zone5_min)
                 .bind(&w.detail_json)
                 .bind(&w.external_id)
                 .execute(&mut *tx)
@@ -531,9 +524,8 @@ mod tests {
         assert!((w.distance_m.unwrap() - 5210.0).abs() < 1e-6);
         assert!((w.elevation_m.unwrap() - 42.0).abs() < 1e-9);
         assert_eq!(w.external_id.as_deref(), Some("SYN-1"));
-        // Nothing derived: no total from active+basal, no HR zones.
+        // Nothing derived: no total from active+basal.
         assert_eq!(w.total_kcal, None);
-        assert!(w.zone1_min.is_none() && w.zone5_min.is_none());
         let d: serde_json::Value = serde_json::from_str(w.detail_json.as_deref().unwrap()).unwrap();
         assert_eq!(d["statistics"].as_array().unwrap().len(), 5);
         assert_eq!(d["statistics"][3]["minimum"], "98");

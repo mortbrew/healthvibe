@@ -1,14 +1,12 @@
-//! Rich workout rows (HR, energy, distance, zones, detail JSON).
+//! Workout rows (HR, energy, distance, detail JSON).
 //!
-//! Duration readings for awards/browse stay in `readings`; this table holds
-//! the extras. Re-sents upsert on
+//! Duration readings for browse stay in `readings`; this table holds the
+//! extras. Re-sends upsert on
 //! `(user_id, channel, source, start_utc, end_utc, activity_type)`.
 //!
-//! ## HR zones
-//! When a payload includes per-sample heart rates, minutes are binned by
-//! fraction of the workout's own max HR:
-//! zone1 &lt;50%, zone2 50–60%, zone3 60–70%, zone4 70–80%, zone5 ≥80%.
-//! If no samples exist, zone columns stay NULL.
+//! Only values the source provides are stored (unit-normalised). Nothing is
+//! computed from samples: no HR zones, and avg/max HR are NULL unless the
+//! source states them.
 
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
@@ -33,11 +31,6 @@ pub struct Workout {
     pub total_kcal: Option<f64>,
     pub distance_m: Option<f64>,
     pub elevation_m: Option<f64>,
-    pub zone1_min: Option<f64>,
-    pub zone2_min: Option<f64>,
-    pub zone3_min: Option<f64>,
-    pub zone4_min: Option<f64>,
-    pub zone5_min: Option<f64>,
     pub detail_json: Option<String>,
     pub external_id: Option<String>,
 }
@@ -97,42 +90,6 @@ fn qty_unit(v: Option<&Value>) -> Option<(f64, String)> {
         Value::String(s) => Some((s.parse().ok()?, String::new())),
         _ => None,
     }
-}
-
-/// Bin HR samples into five zones relative to `max_hr`.
-pub fn zone_minutes(samples: &[(DateTime<FixedOffset>, f64)], max_hr: f64) -> [Option<f64>; 5] {
-    if samples.len() < 2 || max_hr <= 0.0 {
-        return [None; 5];
-    }
-    let mut z = [0.0; 5];
-    for w in samples.windows(2) {
-        let (t0, hr) = w[0];
-        let (t1, _) = w[1];
-        let mins = (t1 - t0).num_milliseconds() as f64 / 60_000.0;
-        if mins <= 0.0 {
-            continue;
-        }
-        let pct = hr / max_hr;
-        let i = if pct < 0.50 {
-            0
-        } else if pct < 0.60 {
-            1
-        } else if pct < 0.70 {
-            2
-        } else if pct < 0.80 {
-            3
-        } else {
-            4
-        };
-        z[i] += mins;
-    }
-    [
-        Some((z[0] * 10.0).round() / 10.0),
-        Some((z[1] * 10.0).round() / 10.0),
-        Some((z[2] * 10.0).round() / 10.0),
-        Some((z[3] * 10.0).round() / 10.0),
-        Some((z[4] * 10.0).round() / 10.0),
-    ]
 }
 
 /// Build a rich workout from a Health Auto Export workout object.
@@ -210,47 +167,24 @@ pub fn from_hae(w: &Value, channel: &str) -> Result<Workout, String> {
                 .and_then(|h| num(h.get("max")).or_else(|| num(h.get("Max"))))
         });
 
-    let mut hr_samples: Vec<(DateTime<FixedOffset>, f64)> = vec![];
-    if let Some(Value::Array(arr)) = o.get("heartRateData").or_else(|| o.get("heartRateSamples")) {
-        for p in arr {
-            let Some(po) = p.as_object() else { continue };
-            let t = txt(po.get("date"))
-                .or_else(|| txt(po.get("startDate")))
-                .and_then(|s| crate::shortcut::parse_ts(&s));
-            let hr = num(po.get("qty")).or_else(|| num(po.get("Avg")));
-            if let (Some(t), Some(hr)) = (t, hr) {
-                hr_samples.push((t, hr));
-            }
-        }
-        hr_samples.sort_by_key(|(t, _)| *t);
-    }
-    let max_hr = max_hr.or_else(|| hr_samples.iter().map(|(_, h)| *h).fold(None, |a, h| Some(a.map_or(h, |x: f64| x.max(h)))));
-    let avg_hr = avg_hr.or_else(|| {
-        if hr_samples.is_empty() {
-            None
-        } else {
-            Some(hr_samples.iter().map(|(_, h)| *h).sum::<f64>() / hr_samples.len() as f64)
-        }
-    });
-    let zones = max_hr
-        .map(|m| zone_minutes(&hr_samples, m))
-        .unwrap_or([None; 5]);
-
     let mut detail = json!({});
     if let Some(obj) = detail.as_object_mut() {
-        for k in ["route", "metadata", "laps", "splits", "stepCadence", "speed"] {
+        // Kept verbatim, as the source sent them.
+        for k in [
+            "route",
+            "metadata",
+            "laps",
+            "splits",
+            "stepCadence",
+            "speed",
+            "heartRate",
+            "heartRateData",
+            "heartRateSamples",
+            "heartRateRecovery",
+        ] {
             if let Some(v) = o.get(k) {
                 obj.insert(k.into(), v.clone());
             }
-        }
-        if !hr_samples.is_empty() {
-            obj.insert(
-                "heartRateData".into(),
-                json!(hr_samples
-                    .iter()
-                    .map(|(t, h)| json!({"date": t.to_rfc3339(), "qty": h}))
-                    .collect::<Vec<_>>()),
-            );
         }
     }
     let detail_json = detail
@@ -274,11 +208,6 @@ pub fn from_hae(w: &Value, channel: &str) -> Result<Workout, String> {
         total_kcal,
         distance_m,
         elevation_m,
-        zone1_min: zones[0],
-        zone2_min: zones[1],
-        zone3_min: zones[2],
-        zone4_min: zones[3],
-        zone5_min: zones[4],
         detail_json,
         external_id: txt(o.get("id")),
     })
@@ -425,11 +354,6 @@ pub fn from_export(attrs: &BTreeMap<String, String>, kids: &ExportChildren) -> O
         total_kcal,
         distance_m,
         elevation_m,
-        zone1_min: None,
-        zone2_min: None,
-        zone3_min: None,
-        zone4_min: None,
-        zone5_min: None,
         detail_json,
         external_id,
     })
@@ -440,15 +364,13 @@ pub async fn upsert(db: &SqlitePool, user_id: i64, w: &Workout) -> anyhow::Resul
         "INSERT INTO workouts
          (user_id, activity_type, channel, source, start_utc, end_utc, local_start, local_end,
           duration_min, avg_hr, max_hr, active_kcal, total_kcal, distance_m, elevation_m,
-          zone1_min, zone2_min, zone3_min, zone4_min, zone5_min, detail_json, external_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          detail_json, external_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT (user_id, channel, source, start_utc, end_utc, activity_type) DO UPDATE SET
            duration_min = excluded.duration_min, avg_hr = excluded.avg_hr, max_hr = excluded.max_hr,
            active_kcal = excluded.active_kcal, total_kcal = excluded.total_kcal,
            distance_m = excluded.distance_m, elevation_m = excluded.elevation_m,
-           zone1_min = excluded.zone1_min, zone2_min = excluded.zone2_min,
-           zone3_min = excluded.zone3_min, zone4_min = excluded.zone4_min,
-           zone5_min = excluded.zone5_min, detail_json = excluded.detail_json,
+           detail_json = excluded.detail_json,
            external_id = COALESCE(excluded.external_id, workouts.external_id),
            local_start = excluded.local_start, local_end = excluded.local_end",
     )
@@ -467,11 +389,6 @@ pub async fn upsert(db: &SqlitePool, user_id: i64, w: &Workout) -> anyhow::Resul
     .bind(w.total_kcal)
     .bind(w.distance_m)
     .bind(w.elevation_m)
-    .bind(w.zone1_min)
-    .bind(w.zone2_min)
-    .bind(w.zone3_min)
-    .bind(w.zone4_min)
-    .bind(w.zone5_min)
     .bind(&w.detail_json)
     .bind(&w.external_id)
     .execute(db)
@@ -496,11 +413,6 @@ struct WorkoutRow {
     total_kcal: Option<f64>,
     distance_m: Option<f64>,
     elevation_m: Option<f64>,
-    zone1_min: Option<f64>,
-    zone2_min: Option<f64>,
-    zone3_min: Option<f64>,
-    zone4_min: Option<f64>,
-    zone5_min: Option<f64>,
     detail_json: Option<String>,
     external_id: Option<String>,
 }
@@ -523,11 +435,6 @@ impl From<WorkoutRow> for Workout {
             total_kcal: r.total_kcal,
             distance_m: r.distance_m,
             elevation_m: r.elevation_m,
-            zone1_min: r.zone1_min,
-            zone2_min: r.zone2_min,
-            zone3_min: r.zone3_min,
-            zone4_min: r.zone4_min,
-            zone5_min: r.zone5_min,
             detail_json: r.detail_json,
             external_id: r.external_id,
         }
@@ -543,7 +450,7 @@ pub async fn list(
     let rows: Vec<WorkoutRow> = sqlx::query_as(
         "SELECT id, activity_type, channel, source, start_utc, end_utc, local_start, local_end,
                 duration_min, avg_hr, max_hr, active_kcal, total_kcal, distance_m, elevation_m,
-                zone1_min, zone2_min, zone3_min, zone4_min, zone5_min, detail_json, external_id
+                detail_json, external_id
          FROM workouts
          WHERE user_id = ? AND (? IS NULL OR start_utc < ?)
          ORDER BY start_utc DESC LIMIT ?",
@@ -561,7 +468,7 @@ pub async fn get(db: &SqlitePool, user_id: i64, id: i64) -> anyhow::Result<Optio
     let row: Option<WorkoutRow> = sqlx::query_as(
         "SELECT id, activity_type, channel, source, start_utc, end_utc, local_start, local_end,
                 duration_min, avg_hr, max_hr, active_kcal, total_kcal, distance_m, elevation_m,
-                zone1_min, zone2_min, zone3_min, zone4_min, zone5_min, detail_json, external_id
+                detail_json, external_id
          FROM workouts WHERE user_id = ? AND id = ?",
     )
     .bind(user_id)
@@ -575,18 +482,6 @@ pub async fn get(db: &SqlitePool, user_id: i64, id: i64) -> anyhow::Result<Optio
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn zones_from_samples() {
-        let t0 = crate::shortcut::parse_ts("2024-06-01T10:00:00-04:00").unwrap();
-        let t1 = t0 + chrono::Duration::minutes(10);
-        let t2 = t1 + chrono::Duration::minutes(10);
-        let samples = vec![(t0, 90.0), (t1, 140.0), (t2, 160.0)];
-        let z = zone_minutes(&samples, 180.0);
-        // 90/180=0.5 → zone2; 140/180≈0.78 → zone4
-        assert!(z[1].unwrap() > 0.0);
-        assert!(z[3].unwrap() > 0.0);
-    }
 
     #[test]
     fn parses_hae_run() {
@@ -616,7 +511,37 @@ mod tests {
         assert!((w.distance_m.unwrap() - 5200.0).abs() < 0.1);
         assert_eq!(w.avg_hr, Some(145.0));
         assert_eq!(w.max_hr, Some(172.0));
-        assert!(w.zone3_min.is_some() || w.zone4_min.is_some() || w.zone5_min.is_some());
         assert_eq!(w.external_id.as_deref(), Some("abc"));
+        let d: Value = serde_json::from_str(w.detail_json.as_deref().unwrap()).unwrap();
+        assert_eq!(d["heartRateData"][1]["qty"], 150, "samples kept verbatim");
+    }
+
+    #[test]
+    fn hae_hr_not_computed_from_samples() {
+        let w = from_hae(
+            &json!({
+                "name": "Outdoor Walk",
+                "start": "2024-06-02 08:00:00 -0400",
+                "end": "2024-06-02 08:30:00 -0400",
+                "heartRateData": [
+                    {"date": "2024-06-02 08:00:00 -0400", "qty": 100},
+                    {"date": "2024-06-02 08:15:00 -0400", "qty": 130}
+                ]
+            }),
+            crate::channel::HEALTH_AUTO_EXPORT,
+        )
+        .unwrap();
+        assert_eq!((w.avg_hr, w.max_hr), (None, None));
+        let w = from_hae(
+            &json!({
+                "name": "Outdoor Walk",
+                "start": "2024-06-02 08:00:00 -0400",
+                "end": "2024-06-02 08:30:00 -0400",
+                "heartRate": {"min": {"qty": 90}, "avg": {"qty": 118}, "max": {"qty": 141}}
+            }),
+            crate::channel::HEALTH_AUTO_EXPORT,
+        )
+        .unwrap();
+        assert_eq!((w.avg_hr, w.max_hr), (Some(118.0), Some(141.0)));
     }
 }

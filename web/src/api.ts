@@ -114,11 +114,6 @@ export type Workout = {
   total_kcal?: number | null;
   distance_m?: number | null;
   elevation_m?: number | null;
-  zone1_min?: number | null;
-  zone2_min?: number | null;
-  zone3_min?: number | null;
-  zone4_min?: number | null;
-  zone5_min?: number | null;
   detail_json?: string | null;
   external_id?: string | null;
 };

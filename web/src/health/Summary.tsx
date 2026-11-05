@@ -489,9 +489,6 @@ export function WorkoutDetail({ id }: { id: string }) {
   if (!w.data) return <div className="page"><p className="muted">Loading…</p></div>;
   const x = w.data;
   const km = x.distance_m != null ? x.distance_m / 1000 : null;
-  const zones = [
-    ["Z1", x.zone1_min], ["Z2", x.zone2_min], ["Z3", x.zone3_min], ["Z4", x.zone4_min], ["Z5", x.zone5_min],
-  ].filter(([, v]) => v != null && (v as number) > 0) as [string, number][];
   return (
     <div className="page">
       <LargeTitle title={prettyWorkout(x.activity_type)} eyebrow={(x.local_start ?? x.start_utc).slice(0, 16)} />
@@ -505,12 +502,6 @@ export function WorkoutDetail({ id }: { id: string }) {
           <div><dt>Max HR</dt><dd className="num">{x.max_hr != null ? `${Math.round(x.max_hr)} bpm` : "—"}</dd></div>
           <div><dt>Source</dt><dd>{x.source || "—"} <span className="muted">({x.channel})</span></dd></div>
         </dl>
-        {zones.length > 0 && (
-          <div className="zones">
-            <b>HR zones</b>
-            <ul>{zones.map(([k, v]) => <li key={k}><span>{k}</span><span className="num">{v.toFixed(1)} min</span></li>)}</ul>
-          </div>
-        )}
       </div>
       <Link to="/" className="card linkrow">Back to Summary</Link>
     </div>
