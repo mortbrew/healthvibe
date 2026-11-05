@@ -96,6 +96,7 @@ mod integration {
     use crate::db::open_memory;
     use sqlx::SqlitePool;
 
+    #[allow(clippy::too_many_arguments)]
     async fn add(
         db: &SqlitePool,
         u: i64,
@@ -136,7 +137,7 @@ mod integration {
     #[tokio::test]
     async fn daily_sum_prefers_export_xml_over_hae() {
         let db = open_memory().await.unwrap();
-        let _steps = "HKQuantityTypeIdentifierStepCount";
+        let steps = "HKQuantityTypeIdentifierStepCount";
         // Same day: HAE Watch 5000, export.xml Watch 8000 → use export.
         add(&db, 1, steps, HEALTH_AUTO_EXPORT, "Watch", "2024-06-01", "2500", 0).await;
         add(&db, 1, steps, HEALTH_AUTO_EXPORT, "Watch", "2024-06-01", "2500", 1).await;

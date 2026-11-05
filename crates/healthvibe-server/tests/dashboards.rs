@@ -101,13 +101,13 @@ async fn two_users(app: &Router) -> (String, String) {
 
 async fn reading(db: &sqlx::SqlitePool, uid: i64, kind: &str, v: &str, day: &str, n: i64) {
     sqlx::query(
-        "INSERT INTO readings (user_id, type, value, unit, start_utc, end_utc, hash, local_start, local_end)
-         VALUES (?, ?, ?, 'count', ?, ?, ?, ?, ?)",
+        "INSERT INTO readings (user_id, type, value, unit, start_utc, end_utc, source, channel, hash, local_start, local_end)
+         VALUES (?, ?, ?, 'count', ?, ?, '', 'unknown', ?, ?, ?)",
     )
     .bind(uid).bind(kind).bind(v)
-    .bind(format!("{day}T08:00:00Z")).bind(format!("{day}T08:10:00Z"))
+    .bind(format!("{day}T08:{n:02}:00Z")).bind(format!("{day}T08:{n:02}:10Z"))
     .bind(format!("{uid}-{kind}-{day}-{n}"))
-    .bind(format!("{day} 08:0{n}:00")).bind(format!("{day} 08:1{n}:00"))
+    .bind(format!("{day} 08:{n:02}:00")).bind(format!("{day} 08:{n:02}:10"))
     .execute(db).await.unwrap();
 }
 
