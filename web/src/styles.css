@@ -483,3 +483,12 @@ button.link:disabled { color: var(--muted); cursor: default; }
 .logo { position: relative; width: 24px; height: 24px; flex: none; }
 .logo i { position: absolute; border: 3px solid; border-radius: 50%; }
 .logo i:nth-child(1) { inset: 0; } .logo i:nth-child(2) { inset: 4px; } .logo i:nth-child(3) { inset: 8px; }
+
+/* Manual goals alert + editor helpers */
+.goals-alert { border: 1px solid color-mix(in srgb, var(--move) 45%, transparent); background: color-mix(in srgb, var(--move) 12%, var(--surface)); }
+.goals-alert-body { display: grid; gap: .55rem; }
+.goals-alert .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.linkish { color: var(--accent, #0a84ff); cursor: pointer; text-decoration: underline; background: none; border: 0; padding: 0; font: inherit; }
+.goalfrom { margin-top: .35rem; }
+.goals-hist { display: flex; align-items: center; gap: .75rem; width: 100%; }
+.goals-hist .row-label { display: block; }

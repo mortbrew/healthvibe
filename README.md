@@ -1,6 +1,6 @@
 # healthvibe
 
-Self-hosted, privacy-first Apple Health dashboard: full-history export.xml import, automatic iPhone sync via the Health Auto Export app, multi-user, themeable web UI, and CSV export of your readings and workouts. A read-only MCP server for AI tools is planned but not built yet.
+Self-hosted, privacy-first Apple Health dashboard: full-history export.xml import, automatic iPhone sync via the Health Auto Export app, multi-user, themeable web UI, manual Activity ring goals (export goals take priority), and CSV export of your readings, workouts and manual goals. A read-only MCP server for AI tools is planned but not built yet.
 
 Status: early development.
 
@@ -42,6 +42,9 @@ re-open it from **Settings** or **Help → Sync your iPhone with Health Auto Exp
    (known ones mapped, unknown ones kept as `healthvibe.hae.<name>`). Re-sent readings
    are updated, never doubled. Max body: `HEALTHVIBE_HAE_MAX_REQUEST_BYTES` (256 MiB).
 4. Data only syncs while the iPhone is unlocked (iOS protects Health data when locked).
+   Ring goals are **not** in Health Auto Export payloads; they come from an `export.xml`
+   import or from **Account → Activity Ring Goals** (manual goals roll forward until an
+   export or a later manual entry takes over; export always wins on the same day).
 
 Simulate the phone (synthetic fixture):
 

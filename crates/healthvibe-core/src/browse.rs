@@ -207,12 +207,15 @@ pub struct RingDay {
     pub move_kcal: f64,
     pub move_goal: Option<f64>,
     pub move_goal_from: Option<String>,
+    pub move_goal_source: Option<String>,
     pub exercise_min: f64,
     pub exercise_goal: Option<f64>,
     pub exercise_goal_from: Option<String>,
+    pub exercise_goal_source: Option<String>,
     pub stand_hours: f64,
     pub stand_goal: Option<f64>,
     pub stand_goal_from: Option<String>,
+    pub stand_goal_source: Option<String>,
     pub workout: bool,
 }
 
@@ -226,9 +229,8 @@ pub async fn rings(
     rings_span(db, uid, start, end, 400).await
 }
 
-/// Like [`rings`] with a caller-chosen day cap. Goals are imported
-/// ActivitySummary goals per [`crate::stats::RingGoals`]: that day's, else the
-/// latest earlier one per ring, else none.
+/// Like [`rings`] with a caller-chosen day cap. Goals follow
+/// [`crate::stats::RingGoals`] (export ActivitySummary + manual entries).
 pub async fn rings_span(
     db: &SqlitePool,
     uid: i64,
@@ -269,12 +271,15 @@ pub async fn rings_span(
                 move_kcal: val(&energy, &d),
                 move_goal: g.move_goal,
                 move_goal_from: g.move_goal_from,
+                move_goal_source: g.move_goal_source,
                 exercise_min: val(&exercise, &d),
                 exercise_goal: g.exercise_goal,
                 exercise_goal_from: g.exercise_goal_from,
+                exercise_goal_source: g.exercise_goal_source,
                 stand_hours: stand.iter().find(|x| x.0 == d).map_or(0.0, |x| x.1),
                 stand_goal: g.stand_goal,
                 stand_goal_from: g.stand_goal_from,
+                stand_goal_source: g.stand_goal_source,
                 workout: workouts.contains(&d),
                 date: d,
             }

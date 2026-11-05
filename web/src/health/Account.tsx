@@ -10,6 +10,7 @@ import Import from "../pages/Import";
 import Admin from "../pages/Admin";
 import { AvatarBuilder, AvatarSvg, asCfg } from "./avatar";
 import { EMPTY_PROFILE, Profile, unitsOf, Units, useHealth } from "./ctx";
+export { GoalsPage, NoGoalsAlert } from "./Goals";
 import { Group, NavBar, RoundBtn, Row, XIcon } from "./ui";
 
 export function AccountSheet() {
@@ -35,6 +36,7 @@ export function AccountMenu() {
       </Group>
       <Group>
         <Row to="/account/details" label="Health Details" />
+        <Row to="/account/goals" label="Activity Ring Goals" />
         <Row to="/account/units" label="Units of Measure" />
         <Row to="/account/privacy" label="Privacy" />
       </Group>
@@ -152,7 +154,7 @@ export function PrivacyPage() {
       <Group title="Sessions"><Row onClick={revoke} label="Sign Out Other Devices" tone="blue" /></Group>
       <section className="card danger">
         <h3>Delete My Data</h3>
-        <p className="muted small">Deletes all readings, workouts, goals and pins for your account. Your login stays. Type <b>{user.username}</b> to confirm.</p>
+        <p className="muted small">Deletes all readings, workouts, imported and manual ring goals, and pins for your account. Your login stays. Type <b>{user.username}</b> to confirm.</p>
         <input value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Confirm username" />
         <button className="pill red" disabled={confirm !== user.username} onClick={del}>Delete Everything</button>
       </section>

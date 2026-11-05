@@ -56,6 +56,7 @@ export const messages: Record<string, string> = {
   invalid_name: "Dashboard names need 1 to 60 characters.",
   invalid_pinned: "You can pin up to 30 metrics.",
   invalid_profile: "Check the profile fields: dates as YYYY-MM-DD, height 30–272 cm, goals in range.",
+  invalid_goal: "Set at least one ring goal with a sensible value (Move, Exercise or Stand).",
   invalid_date: "Use a date like 2026-11-04.",
   confirm_mismatch: "Type your username exactly to confirm.",
 };
@@ -71,12 +72,15 @@ export type Activity = {
     move_kcal: number;
     move_goal: number | null;
     move_goal_from: string | null;
+    move_goal_source?: string | null;
     exercise_min: number;
     exercise_goal: number | null;
     exercise_goal_from: string | null;
+    exercise_goal_source?: string | null;
     stand_hours: number;
     stand_goal: number | null;
     stand_goal_from: string | null;
+    stand_goal_source?: string | null;
     steps: number;
   };
   steps: DayValue[];

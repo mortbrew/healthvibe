@@ -10,6 +10,7 @@ pub mod db;
 pub mod hae;
 pub mod handoff;
 pub mod import;
+pub mod manual_goals;
 pub mod profile;
 pub mod seed;
 pub mod shortcut;

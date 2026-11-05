@@ -262,7 +262,31 @@ async fn privacy_export_delete_and_sessions() {
             .execute(&db)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO manual_goals (user_id, effective_from, move_kcal, exercise_min, stand_hours, created_at)
+             VALUES (?, '2026-01-01', 500, 30, 12, '2026-01-01T00:00:00Z')",
+        )
+        .bind(uid)
+        .execute(&db)
+        .await
+        .unwrap();
     }
+    // CSV includes this user's manual goals only.
+    let req = Request::builder()
+        .uri("/api/v1/me/export.csv")
+        .header(header::COOKIE, &admin)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let csv2 = String::from_utf8(
+        axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(csv2.contains("ManualGoal:"), "{csv2}");
+    assert!(csv2.contains("ManualGoal:") && csv2.contains(":move"));
     assert_eq!(
         call(
             &app,
@@ -292,7 +316,7 @@ async fn privacy_export_delete_and_sessions() {
         .await
         .unwrap();
     assert_eq!(left, vec![2]);
-    for table in ["workouts", "ingest_raw"] {
+    for table in ["workouts", "ingest_raw", "manual_goals"] {
         let left: Vec<i64> = sqlx::query_scalar(&format!("SELECT user_id FROM {table}"))
             .fetch_all(&db)
             .await

@@ -52,7 +52,7 @@ in the same database, tagged with the channel they came from
    reverse proxy may enforce its own, smaller limit.
 4. A background job reads `export.xml` from the zip and writes records,
    workouts (with their statistics, events, metadata and route file names)
-   and Activity ring goals to the database.
+   and Activity ring goals (and any manual goals you set) to the database.
 5. The staged zip is deleted when the job finishes, whether it succeeded or
    failed. If the process is killed mid-import, the zip stays in the staging
    dir until the next start: on startup healthvibe deletes leftover
@@ -158,7 +158,8 @@ features it has are outside healthvibe's control. Check its privacy policy.
 |---|---|---|
 | Health samples: steps, heart rate, sleep, body measurements etc., with source device names and time zone | `readings` | **Plain text, not encrypted** |
 | Workouts and their raw details (statistics, events, metadata, route file names) | `workouts` | **Plain text** |
-| Activity ring goals | `activity_goals` | **Plain text** |
+| Activity ring goals (from export.xml ActivitySummary) | `activity_goals` | **Plain text** |
+| Manual Activity ring goals (history) | `manual_goals` | **Plain text** |
 | Profile: display name, birth date, sex, height, wheelchair use, avatar settings, units | `profiles` | **Plain text** |
 | Pinned metrics, dashboards, theme | various | Plain text |
 | Failed Shortcut upload bodies, for up to 24 h | `ingest_raw` | **Plain text** |
@@ -270,12 +271,13 @@ where provider keys are stored (planned: encrypted under the per-user key, see
   deliberately persisted in browser storage, but it lives in page memory and
   may sit in the browser's normal HTTP cache. Use a private window on shared
   computers and sign out afterwards.
-- "Export CSV" downloads your readings and workouts as a plain-text file
-  (columns `type,value,unit,start_utc,end_utc,source`; each workout is a
-  `Workout:<type>` row plus one `Workout:<type>:<field>` row per stored
-  value). Once downloaded it is outside healthvibe's protection.
-- "Delete all my health data" removes your readings, workouts, ring goals,
-  pending raw uploads, sync cursors and pinned metrics.
+- "Export CSV" downloads your readings, workouts and manual ring goals as a
+  plain-text file (columns `type,value,unit,start_utc,end_utc,source`; each
+  workout is a `Workout:<type>` row plus one `Workout:<type>:<field>` row per
+  stored value; each manual goal is a `ManualGoal:<id>` row plus field rows).
+  Once downloaded it is outside healthvibe's protection.
+- "Delete all my health data" removes your readings, workouts, imported and
+  manual ring goals, pending raw uploads, sync cursors and pinned metrics.
   It keeps your account, profile, dashboards and paired device. Copies in
   backups, WAL or disk snapshots are not touched.
 - Every response carries security headers:
@@ -299,10 +301,19 @@ healthvibe shows only what was imported, plus daily totals and unit
 conversions. It does not work out heart-rate zones, workout heart-rate
 averages from samples, sleep sessions or naps, streaks, or default ring goals,
 and there is no awards feature. Sleep is shown as the raw stage samples, each
-counted on the local date its sample **ends**. A day without an imported ring
-goal shows the most recent earlier imported goal for that ring, labelled with
-its date (for example "Goal from Nov 2"); days before the first imported goal
-show no goal.
+counted on the local date its sample **ends**.
+
+Ring goals come from an Apple Health `export.xml` ActivitySummary and/or from
+goals you set in the app (Account → Activity Ring Goals). Per ring, for local
+day `D`: if `D` has its own export ActivitySummary goal, that value is used;
+otherwise the most recent goal dated on or before `D` across export goals and
+manual entries applies, and on a same-date tie the export wins. A later manual
+entry overrides an older export going forward; a later export takes over again.
+Days before any goal show none — there are never default goals. Reused or
+manual goals are labelled (for example "Goals from Nov 3 export" or "Goal you
+set Nov 5"). Health Auto Export does not carry ring goals, so without an
+export.xml import or a manual entry the rings have no goal and the Summary /
+Activity day views ask you to set one.
 
 ## 9. Threat model
 

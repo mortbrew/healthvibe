@@ -114,70 +114,149 @@ pub async fn daily_avg(
 pub struct Rings {
     pub date: String,
     pub move_kcal: f64,
-    /// Imported ActivitySummary goal; see [`RingGoals`].
+    /// Resolved ring goal; see [`RingGoals`].
     pub move_goal: Option<f64>,
     pub move_goal_from: Option<String>,
+    pub move_goal_source: Option<String>,
     pub exercise_min: f64,
     pub exercise_goal: Option<f64>,
     pub exercise_goal_from: Option<String>,
+    pub exercise_goal_source: Option<String>,
     pub stand_hours: f64,
     pub stand_goal: Option<f64>,
     pub stand_goal_from: Option<String>,
+    pub stand_goal_source: Option<String>,
     pub steps: f64,
 }
 
-/// One day's ring goals, per ring. A goal is that day's imported
-/// ActivitySummary value, or else the most recent earlier imported value for
-/// that ring (`*_from` is then that earlier date). Before the first imported
-/// goal there is none. Never a default.
+/// One day's ring goals, per ring.
+///
+/// Resolution for local day `D`:
+/// 1. If `D` has its own export.xml ActivitySummary value for that ring, use it.
+/// 2. Else take the most recent goal dated on or before `D` across export goals
+///    and manual entries (by effective date). On a same-date tie, export wins.
+/// 3. A later manual entry overrides an older export going forward; a later
+///    export takes over again. Days before any goal show none. Never a default.
+///
+/// `*_from` is the goal's date. For an export goal on `D` itself it is `None`
+/// (same as the export-only reuse behaviour). For a manual goal it is always
+/// the entry's `effective_from`, even when that equals `D`. `*_source` is
+/// `"export"` or `"manual"` when a goal is present.
 #[derive(Debug, Default, PartialEq)]
 pub struct RingGoals {
     pub move_goal: Option<f64>,
     pub move_goal_from: Option<String>,
+    pub move_goal_source: Option<String>,
     pub exercise_goal: Option<f64>,
     pub exercise_goal_from: Option<String>,
+    pub exercise_goal_source: Option<String>,
     pub stand_goal: Option<f64>,
     pub stand_goal_from: Option<String>,
+    pub stand_goal_source: Option<String>,
 }
 
-/// `(date, move_kcal, exercise_min, stand_hours)` from `activity_goals_best`.
-pub type GoalRow = (String, Option<f64>, Option<f64>, Option<f64>);
+/// A candidate goal row for resolution: export ActivitySummary or manual entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GoalRow {
+    pub date: String,
+    /// `"export"` or `"manual"`.
+    pub source: &'static str,
+    pub move_kcal: Option<f64>,
+    pub exercise_min: Option<f64>,
+    pub stand_hours: Option<f64>,
+}
 
-/// Imported goal rows for a user up to and including `end`, oldest first.
+/// Export + manual goal rows for a user up to and including `end`, oldest first.
 pub async fn goal_rows_upto(
     db: &SqlitePool,
     user_id: i64,
     end: &str,
 ) -> anyhow::Result<Vec<GoalRow>> {
-    Ok(sqlx::query_as(
+    type ExportRow = (String, Option<f64>, Option<f64>, Option<f64>);
+    let export: Vec<ExportRow> = sqlx::query_as(
         "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals_best
          WHERE user_id = ? AND date <= ? ORDER BY date",
     )
     .bind(user_id)
     .bind(end)
     .fetch_all(db)
-    .await?)
+    .await?;
+    let manual = crate::manual_goals::rows_upto(db, user_id, end).await?;
+    let mut rows: Vec<GoalRow> = export
+        .into_iter()
+        .map(|(date, move_kcal, exercise_min, stand_hours)| GoalRow {
+            date,
+            source: "export",
+            move_kcal,
+            exercise_min,
+            stand_hours,
+        })
+        .chain(
+            manual
+                .into_iter()
+                .map(|(date, move_kcal, exercise_min, stand_hours)| GoalRow {
+                    date,
+                    source: "manual",
+                    move_kcal,
+                    exercise_min,
+                    stand_hours,
+                }),
+        )
+        .collect();
+    // Date ascending; on a tie put export before manual so a reverse scan that
+    // prefers later dates still sees export first when dates match and we
+    // compare sources explicitly in `goals_for`.
+    rows.sort_by(|a, b| {
+        a.date
+            .cmp(&b.date)
+            .then_with(|| (a.source != "export").cmp(&(b.source != "export")))
+    });
+    Ok(rows)
 }
 
-/// Goals for `date` from `rows` (sorted by date, as [`goal_rows_upto`] returns).
+/// Goals for `date` from `rows` (as [`goal_rows_upto`] returns).
 pub fn goals_for(rows: &[GoalRow], date: &str) -> RingGoals {
-    let upto = &rows[..rows.partition_point(|r| r.0.as_str() <= date)];
-    let pick = |f: fn(&GoalRow) -> Option<f64>| -> (Option<f64>, Option<String>) {
-        match upto.iter().rev().find_map(|r| f(r).map(|v| (v, &r.0))) {
-            Some((v, d)) => (Some(v), (d != date).then(|| d.clone())),
-            None => (None, None),
+    let upto = &rows[..rows.partition_point(|r| r.date.as_str() <= date)];
+    let pick = |f: fn(&GoalRow) -> Option<f64>| -> (Option<f64>, Option<String>, Option<String>) {
+        let mut best: Option<&GoalRow> = None;
+        for r in upto {
+            if f(r).is_none() {
+                continue;
+            }
+            best = Some(match best {
+                None => r,
+                Some(b) if r.date > b.date => r,
+                // Same date: export beats manual.
+                Some(b) if r.date == b.date && r.source == "export" && b.source == "manual" => r,
+                Some(b) => b,
+            });
+        }
+        match best {
+            Some(r) => {
+                let v = f(r).unwrap();
+                let from = if r.source == "export" && r.date == date {
+                    None
+                } else {
+                    Some(r.date.clone())
+                };
+                (Some(v), from, Some(r.source.to_string()))
+            }
+            None => (None, None, None),
         }
     };
-    let (move_goal, move_goal_from) = pick(|r| r.1);
-    let (exercise_goal, exercise_goal_from) = pick(|r| r.2);
-    let (stand_goal, stand_goal_from) = pick(|r| r.3);
+    let (move_goal, move_goal_from, move_goal_source) = pick(|r| r.move_kcal);
+    let (exercise_goal, exercise_goal_from, exercise_goal_source) = pick(|r| r.exercise_min);
+    let (stand_goal, stand_goal_from, stand_goal_source) = pick(|r| r.stand_hours);
     RingGoals {
         move_goal,
         move_goal_from,
+        move_goal_source,
         exercise_goal,
         exercise_goal_from,
+        exercise_goal_source,
         stand_goal,
         stand_goal_from,
+        stand_goal_source,
     }
 }
 
@@ -235,20 +314,22 @@ pub async fn activity(
     .bind(shift(&date, 1))
     .fetch_one(db)
     .await?;
-    // Goals: imported ActivitySummary goals only (that day's, else the latest
-    // earlier one per ring). No defaults.
+    // Goals: export ActivitySummary + manual entries (see [`RingGoals`]). No defaults.
     let g = goals_for(&goal_rows_upto(db, user_id, &date).await?, &date);
     let rings = Rings {
         date: date.clone(),
         move_kcal: on(&energy, &date),
         move_goal: g.move_goal,
         move_goal_from: g.move_goal_from,
+        move_goal_source: g.move_goal_source,
         exercise_min: on(&exercise, &date),
         exercise_goal: g.exercise_goal,
         exercise_goal_from: g.exercise_goal_from,
+        exercise_goal_source: g.exercise_goal_source,
         stand_hours: stand as f64,
         stand_goal: g.stand_goal,
         stand_goal_from: g.stand_goal_from,
+        stand_goal_source: g.stand_goal_source,
         steps: on(&steps, &date),
     };
     Ok(Activity {
@@ -706,6 +787,211 @@ mod tests {
             ]
         );
         assert_eq!(days[3].exercise_goal_from.as_deref(), Some("2000-01-01"));
+        // Export-only path still reports source "export".
+        assert_eq!(days[1].move_goal_source.as_deref(), Some("export"));
+        assert_eq!(days[2].move_goal_source.as_deref(), Some("export"));
+    }
+
+    #[tokio::test]
+    async fn ring_goals_manual_roll_forward_export_wins_ties_and_isolates() {
+        let db = seeded().await;
+        // Export on Jan 1; manual on Jan 5 (move only); export on Jan 10; manual on Jan 10 (tie).
+        sqlx::query(
+            "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
+             VALUES (1, '2000-01-01', 'export_xml', 500, 30, 8),
+                    (1, '2000-01-10', 'export_xml', 700, 40, 10),
+                    (2, '2000-01-01', 'export_xml', 999, 99, 9)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO manual_goals (user_id, effective_from, move_kcal, exercise_min, stand_hours, created_at)
+             VALUES (1, '2000-01-05', 600, NULL, NULL, '2000-01-05T00:00:00Z'),
+                    (1, '2000-01-10', 650, 35, NULL, '2000-01-10T00:00:00Z'),
+                    (2, '2000-01-05', 1, 1, 1, '2000-01-05T00:00:00Z')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let ring = |d: &str| {
+            let db = db.clone();
+            let d = d.to_string();
+            async move { activity(&db, 1, Some(d)).await.unwrap().rings.unwrap() }
+        };
+
+        // Nothing before the first goal.
+        let r = ring("1999-12-31").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (None, None, None)
+        );
+        assert_eq!(r.move_goal_source, None);
+
+        // Day's own export wins; no _from for export-on-day.
+        let r = ring("2000-01-01").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(500.0), Some(30.0), Some(8.0))
+        );
+        assert_eq!(
+            (r.move_goal_from, r.move_goal_source.as_deref()),
+            (None, Some("export"))
+        );
+
+        // Export rolls forward.
+        let r = ring("2000-01-03").await;
+        assert_eq!(r.move_goal, Some(500.0));
+        assert_eq!(
+            (r.move_goal_from.as_deref(), r.move_goal_source.as_deref()),
+            (Some("2000-01-01"), Some("export"))
+        );
+
+        // Later manual overrides export going forward (move only; exercise/stand stay export).
+        let r = ring("2000-01-05").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(600.0), Some(30.0), Some(8.0))
+        );
+        assert_eq!(
+            (
+                r.move_goal_from.as_deref(),
+                r.move_goal_source.as_deref(),
+                r.exercise_goal_from.as_deref(),
+                r.exercise_goal_source.as_deref()
+            ),
+            (
+                Some("2000-01-05"),
+                Some("manual"),
+                Some("2000-01-01"),
+                Some("export")
+            )
+        );
+        let r = ring("2000-01-07").await;
+        assert_eq!(r.move_goal, Some(600.0));
+        assert_eq!(r.move_goal_source.as_deref(), Some("manual"));
+
+        // Same-date tie: export beats manual. Manual's exercise does not apply on that day
+        // for rings the export provides; export move/exercise/stand win.
+        let r = ring("2000-01-10").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(700.0), Some(40.0), Some(10.0))
+        );
+        assert_eq!(
+            (r.move_goal_from, r.move_goal_source.as_deref()),
+            (None, Some("export"))
+        );
+
+        // Later export takes over again after the Jan 5 manual.
+        let r = ring("2000-01-12").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (Some(700.0), Some(40.0), Some(10.0))
+        );
+        assert_eq!(
+            (r.move_goal_from.as_deref(), r.move_goal_source.as_deref()),
+            (Some("2000-01-10"), Some("export"))
+        );
+
+        // User isolation: user 2's goals never apply to user 1; empty user has none.
+        let other = activity(&db, 2, Some("2000-01-05".into()))
+            .await
+            .unwrap()
+            .rings
+            .unwrap();
+        assert_eq!(other.move_goal, Some(1.0));
+        let empty = activity(&db, 3, Some("2000-01-05".into()))
+            .await
+            .unwrap()
+            .rings
+            .unwrap();
+        // User 3 has no goals of their own (user 1/2 data never leaks).
+        assert_eq!(
+            (empty.move_goal, empty.exercise_goal, empty.stand_goal),
+            (None, None, None)
+        );
+
+        // Partial manual only: clear goals and set stand-only manual.
+        sqlx::query("DELETE FROM activity_goals WHERE user_id = 1")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM manual_goals WHERE user_id = 1")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO manual_goals (user_id, effective_from, move_kcal, exercise_min, stand_hours, created_at)
+             VALUES (1, '2000-02-01', NULL, NULL, 12, '2000-02-01T00:00:00Z')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let r = ring("2000-02-03").await;
+        assert_eq!(
+            (r.move_goal, r.exercise_goal, r.stand_goal),
+            (None, None, Some(12.0))
+        );
+        assert_eq!(r.stand_goal_source.as_deref(), Some("manual"));
+        assert_eq!(r.stand_goal_from.as_deref(), Some("2000-02-01"));
+    }
+
+    #[tokio::test]
+    async fn manual_goals_crud_is_user_scoped() {
+        let db = seeded().await;
+        use crate::manual_goals::{self, ManualGoalInput};
+        let a = ManualGoalInput {
+            effective_from: "2024-01-01".into(),
+            move_kcal: Some(400.0),
+            exercise_min: Some(30.0),
+            stand_hours: Some(12.0),
+        };
+        let g = manual_goals::create(&db, 1, &a).await.unwrap();
+        assert_eq!(g.move_kcal, Some(400.0));
+        let listed = manual_goals::list(&db, 1).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(manual_goals::list(&db, 2).await.unwrap().is_empty());
+        let upd = ManualGoalInput {
+            effective_from: "2024-01-02".into(),
+            move_kcal: Some(450.0),
+            exercise_min: None,
+            stand_hours: Some(10.0),
+        };
+        let g2 = manual_goals::update(&db, 1, g.id, &upd)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(g2.effective_from, "2024-01-02");
+        assert_eq!(g2.move_kcal, Some(450.0));
+        assert_eq!(g2.exercise_min, None);
+        // Other user cannot update/delete.
+        assert!(manual_goals::update(&db, 2, g.id, &upd)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!manual_goals::delete(&db, 2, g.id).await.unwrap());
+        assert!(manual_goals::delete(&db, 1, g.id).await.unwrap());
+        assert!(manual_goals::list(&db, 1).await.unwrap().is_empty());
+        assert_eq!(
+            manual_goals::validate(&ManualGoalInput {
+                effective_from: "bad".into(),
+                move_kcal: Some(1.0),
+                exercise_min: None,
+                stand_hours: None,
+            }),
+            Err("invalid_date")
+        );
+        assert_eq!(
+            manual_goals::validate(&ManualGoalInput {
+                effective_from: "2024-01-01".into(),
+                move_kcal: None,
+                exercise_min: None,
+                stand_hours: None,
+            }),
+            Err("empty_goal")
+        );
     }
 
     #[tokio::test]

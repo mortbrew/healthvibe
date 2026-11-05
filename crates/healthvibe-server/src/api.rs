@@ -18,7 +18,7 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use healthvibe_core::{auth, browse, dashboards, import, profile, stats};
+use healthvibe_core::{auth, browse, dashboards, import, manual_goals, profile, stats};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
@@ -54,6 +54,14 @@ pub fn routes() -> Router<AppState> {
         .route("/me/export.csv", get(export_csv))
         .route("/me/data", axum::routing::delete(delete_data))
         .route("/me/sessions/others", axum::routing::delete(revoke_others))
+        .route(
+            "/me/manual-goals",
+            get(list_manual_goals).post(create_manual_goal),
+        )
+        .route(
+            "/me/manual-goals/{id}",
+            put(update_manual_goal).delete(delete_manual_goal),
+        )
         .route("/workouts", get(workouts_list))
         .route("/workouts/{id}", get(workout_one))
         .route("/rings", get(rings))
@@ -846,6 +854,34 @@ async fn export_csv(State(st): State<AppState>, User(u): User) -> ApiResult<Resp
             }
         }
     }
+    // Manual ring goals (history): one ManualGoal row, then one field row per set value.
+    type Mg = (i64, String, Option<f64>, Option<f64>, Option<f64>, String);
+    let manuals: Vec<Mg> = sqlx::query_as(
+        "SELECT id, effective_from, move_kcal, exercise_min, stand_hours, created_at
+         FROM manual_goals WHERE user_id = ? ORDER BY effective_from, id",
+    )
+    .bind(u.id)
+    .fetch_all(&st.db)
+    .await?;
+    for m in manuals {
+        let kind = format!("ManualGoal:{}", m.0);
+        let stamp = &m.1; // effective_from as start/end local day marker
+        let mut row = |ty: &str, value: String, unit: &str| {
+            let f = [ty, &value, unit, stamp, stamp, "manual"];
+            out.push_str(&f.iter().map(|x| csv_field(x)).collect::<Vec<_>>().join(","));
+            out.push('\n');
+        };
+        row(&kind, m.5.clone(), "");
+        if let Some(v) = m.2 {
+            row(&format!("{kind}:move"), v.to_string(), "kcal");
+        }
+        if let Some(v) = m.3 {
+            row(&format!("{kind}:exercise"), v.to_string(), "min");
+        }
+        if let Some(v) = m.4 {
+            row(&format!("{kind}:stand"), v.to_string(), "hr");
+        }
+    }
     Ok((
         [
             (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
@@ -864,8 +900,8 @@ struct Confirm {
     confirm: String,
 }
 
-/// Delete all of this user's health data (readings, workouts, goals, raw uploads awaiting
-/// parse, sync cursors, pinned metrics). Keeps the account, profile and devices.
+/// Delete all of this user's health data (readings, workouts, imported and manual goals,
+/// raw uploads awaiting parse, sync cursors, pinned metrics). Keeps the account, profile and devices.
 async fn delete_data(
     State(st): State<AppState>,
     User(u): User,
@@ -879,6 +915,7 @@ async fn delete_data(
         "readings",
         "workouts",
         "activity_goals",
+        "manual_goals",
         "ingest_raw",
         "sync_cursors",
         "pinned_metrics",
@@ -903,6 +940,55 @@ async fn revoke_others(State(st): State<AppState>, h: HeaderMap, User(u): User) 
         .await?
         .rows_affected();
     Ok(Json(json!({ "revoked": n })))
+}
+
+async fn list_manual_goals(State(st): State<AppState>, User(u): User) -> ApiResult {
+    let goals = manual_goals::list(&st.db, u.id).await?;
+    Ok(Json(json!({ "goals": goals })))
+}
+
+async fn create_manual_goal(
+    State(st): State<AppState>,
+    User(u): User,
+    Json(body): Json<manual_goals::ManualGoalInput>,
+) -> ApiResult {
+    match manual_goals::validate(&body) {
+        Err("invalid_date") => return Err(bad("invalid_date")),
+        Err("invalid_goal") | Err("empty_goal") => return Err(bad("invalid_goal")),
+        Err(_) => return Err(bad("invalid_goal")),
+        Ok(()) => {}
+    }
+    let g = manual_goals::create(&st.db, u.id, &body).await?;
+    Ok(Json(json!({ "goal": g })))
+}
+
+async fn update_manual_goal(
+    State(st): State<AppState>,
+    User(u): User,
+    Path(id): Path<i64>,
+    Json(body): Json<manual_goals::ManualGoalInput>,
+) -> ApiResult {
+    match manual_goals::validate(&body) {
+        Err("invalid_date") => return Err(bad("invalid_date")),
+        Err("invalid_goal") | Err("empty_goal") => return Err(bad("invalid_goal")),
+        Err(_) => return Err(bad("invalid_goal")),
+        Ok(()) => {}
+    }
+    match manual_goals::update(&st.db, u.id, id, &body).await? {
+        Some(g) => Ok(Json(json!({ "goal": g }))),
+        None => Err(ApiError(StatusCode::NOT_FOUND, "not_found")),
+    }
+}
+
+async fn delete_manual_goal(
+    State(st): State<AppState>,
+    User(u): User,
+    Path(id): Path<i64>,
+) -> ApiResult {
+    if !manual_goals::delete(&st.db, u.id, id).await? {
+        return Err(ApiError(StatusCode::NOT_FOUND, "not_found"));
+    }
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]

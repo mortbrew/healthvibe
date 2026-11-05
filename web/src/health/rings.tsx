@@ -1,7 +1,6 @@
 // Fitness-style activity rings (original drawing): thick round caps, dim track, arrows at 12 o'clock.
-// A goal is the day's imported ActivitySummary goal, else the latest earlier
-// imported one (then `*_goal_from` is that date, shown by <GoalFrom>). Before the
-// first imported goal it is null: the ring then shows only its track.
+// A goal is that day's export ActivitySummary value, else the latest earlier export or
+// manual goal per ring (see server RingGoals). Before the first goal it is null: the ring then shows only its track. Never a default.
 export type RingVals = { move: [number, number | null]; exercise: [number, number | null]; stand: [number, number | null] };
 
 function One({ r, w, frac, color, arrow, dim }: { r: number; w: number; frac: number; color: string; arrow?: number; dim?: boolean }) {
@@ -52,20 +51,67 @@ export const ringsOf = (d: { move_kcal: number; move_goal: number | null; exerci
 });
 
 
-export type GoalFromDates = { move_goal_from?: string | null; exercise_goal_from?: string | null; stand_goal_from?: string | null };
+export type GoalFromDates = {
+  move_goal_from?: string | null;
+  exercise_goal_from?: string | null;
+  stand_goal_from?: string | null;
+  move_goal_source?: string | null;
+  exercise_goal_source?: string | null;
+  stand_goal_source?: string | null;
+};
 
 const shortDay = (d: string) => new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
 
-/** "Goal from Nov 2" when a ring's goal was imported on an earlier day; nothing otherwise. */
+type Part = { ring: string; date: string; source: "export" | "manual" };
+
+/** Label for reused / manual goals, e.g. "Goals from Nov 3 export" or "Goal you set Nov 5". */
 export function GoalFrom({ r, className }: { r: GoalFromDates; className?: string }) {
-  const parts: [string, string][] = (
-    [["Move", r.move_goal_from], ["Exercise", r.exercise_goal_from], ["Stand", r.stand_goal_from]] as [string, string | null | undefined][]
-  ).filter((x): x is [string, string] => !!x[1]);
+  const parts: Part[] = (
+    [
+      ["Move", r.move_goal_from, r.move_goal_source],
+      ["Exercise", r.exercise_goal_from, r.exercise_goal_source],
+      ["Stand", r.stand_goal_from, r.stand_goal_source],
+    ] as [string, string | null | undefined, string | null | undefined][]
+  )
+    .filter((x): x is [string, string, string] => !!x[1] && (x[2] === "export" || x[2] === "manual"))
+    .map(([ring, date, source]) => ({ ring, date, source: source as "export" | "manual" }));
   if (!parts.length) return null;
-  const dates = [...new Set(parts.map((x) => x[1]))];
-  const text =
-    dates.length === 1
-      ? `${parts.length === 3 ? "Goals" : parts.map((x) => x[0]).join(" and ") + " goal"} from ${shortDay(dates[0])}`
-      : parts.map(([k, d]) => `${k} goal from ${shortDay(d)}`).join(" · ");
-  return <p className={`muted small goalfrom ${className ?? ""}`.trim()} title="This day has no imported goal; the latest earlier imported goal is shown.">{text}</p>;
+
+  const manuals = parts.filter((p) => p.source === "manual");
+  const exports = parts.filter((p) => p.source === "export");
+  const bits: string[] = [];
+
+  const group = (list: Part[], kind: "export" | "manual") => {
+    if (!list.length) return;
+    const dates = [...new Set(list.map((x) => x.date))];
+    if (kind === "manual") {
+      if (dates.length === 1) {
+        bits.push(
+          list.length === 3
+            ? `Goals you set ${shortDay(dates[0])}`
+            : `${list.map((x) => x.ring).join(" and ")} goal you set ${shortDay(dates[0])}`,
+        );
+      } else {
+        bits.push(...list.map((p) => `${p.ring} goal you set ${shortDay(p.date)}`));
+      }
+    } else if (dates.length === 1) {
+      bits.push(
+        list.length === 3
+          ? `Goals from ${shortDay(dates[0])} export`
+          : `${list.map((x) => x.ring).join(" and ")} goal from ${shortDay(dates[0])} export`,
+      );
+    } else {
+      bits.push(...list.map((p) => `${p.ring} goal from ${shortDay(p.date)} export`));
+    }
+  };
+  group(manuals, "manual");
+  group(exports, "export");
+
+  const title =
+    "Goals from an Apple Health export always take priority over goals you set here. A later entry of either kind rolls forward until another one takes over.";
+  return <p className={`muted small goalfrom ${className ?? ""}`.trim()} title={title}>{bits.join(" · ")}</p>;
 }
+
+/** True when none of the three rings has a resolved goal. */
+export const noGoals = (r: { move_goal: number | null; exercise_goal: number | null; stand_goal: number | null } | null | undefined) =>
+  !!r && r.move_goal == null && r.exercise_goal == null && r.stand_goal == null;

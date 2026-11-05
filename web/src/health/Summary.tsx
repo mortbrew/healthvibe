@@ -5,12 +5,13 @@ import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
 import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, ENERGY, fmtNum, Spark, STEPS, unitLabel, useApi, useBrowse, when } from "./meta";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
-import { FitRings, GoalFrom, ofGoal, ringsOf } from "./rings";
+import { FitRings, GoalFrom, noGoals, ofGoal, ringsOf } from "./rings";
+import { NoGoalsAlert } from "./Goals";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
-export type RingDay = { date: string; move_kcal: number; move_goal: number | null; move_goal_from: string | null; exercise_min: number; exercise_goal: number | null; exercise_goal_from: string | null; stand_hours: number; stand_goal: number | null; stand_goal_from: string | null; workout: boolean };
+export type RingDay = { date: string; move_kcal: number; move_goal: number | null; move_goal_from: string | null; move_goal_source?: string | null; exercise_min: number; exercise_goal: number | null; exercise_goal_from: string | null; exercise_goal_source?: string | null; stand_hours: number; stand_goal: number | null; stand_goal_from: string | null; stand_goal_source?: string | null; workout: boolean };
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const hourly = (m: string, d?: string | null) => `/hourly?metric=${encodeURIComponent(m)}${d ? `&date=${d}` : ""}`;
@@ -58,9 +59,11 @@ export default function Summary() {
   const sum = (v?: number[]) => (v ?? []).reduce((a, b) => a + b, 0);
   const [dv, du] = conv(sum(dist.data?.values), dist.data?.unit ?? "mi", units);
 
+  const showAlert = r != null && r.date === today() && noGoals(r);
   return (
     <div className="page summary">
       <LargeTitle title="Summary" eyebrow={new Date().toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }).toUpperCase()} />
+      <NoGoalsAlert show={showAlert} />
       <Link to={`/activity/${r?.date ?? today()}`} className="card ringcard">
         <div className="tile-head"><b>Activity Rings</b><ChevronCircle /></div>
         <div className="ringrow">
@@ -72,7 +75,8 @@ export default function Summary() {
           </dl>
         </div>
         {r && <GoalFrom r={r} />}
-        {r && r.move_goal == null && r.exercise_goal == null && r.stand_goal == null && <p className="muted small">No ring goals in your data for this day.</p>}
+        {r && noGoals(r) && <p className="muted small">No ring goals for this day. <span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Set goals</span></p>}
+        {r && !noGoals(r) && <p className="muted small"><span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Edit goals</span></p>}
         {r && r.date !== today() && <p className="muted small">Latest data: {dayTitle(r.date)}</p>}
       </Link>
 
@@ -352,9 +356,11 @@ export function ActivityDay({ date }: { date: string }) {
   const r = act.data?.rings?.date === date ? act.data.rings : null;
   const title = `${date === today() ? "Today, " : ""}${new Date(date + "T12:00:00").toLocaleDateString([], { weekday: date === today() ? undefined : "short", month: "short", day: "numeric", year: "numeric" })}`;
   const hmTot = (m: number) => `${Math.floor(m / 60)}H ${Math.round(m % 60)}M`;
+  const showAlert = date === today() && noGoals(r);
   return (
     <div className="page activityday">
       <NavBar to="/" title={title} right={<RoundBtn label="Calendar" onClick={() => setCal(true)}><CalIcon /></RoundBtn>} />
+      <NoGoalsAlert show={showAlert} />
       <div className="weekstrip">
         {Array.from({ length: 7 }, (_, i) => {
           const d = addDays(mon, i);
@@ -370,6 +376,7 @@ export function ActivityDay({ date }: { date: string }) {
       </div>
       <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} /></div>
       {r && <GoalFrom r={r} className="center" />}
+      {r && <p className="muted small center"><Link to="/account/goals">{noGoals(r) ? "Set goals" : "Edit goals"}</Link></p>}
       <div className="act-charts">
       <section className="actsec">
         <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>

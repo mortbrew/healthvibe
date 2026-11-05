@@ -7,7 +7,8 @@ import Dashboard from "./pages/Dashboard";
 import Summary, { ActivityDay, DistanceDetail, StepsDetail, WorkoutDetail } from "./health/Summary";
 import Browse, { AllRecords, BrowseCategory, MetricDetail } from "./health/Browse";
 import Trends, { TrendDetail } from "./health/Trends";
-import { AccountMenu, AccountSheet, AppearancePage, DetailsPage, ImportPage, PasswordPage, PrivacyPage, ProfilePage, SyncPage, UnitsPage, UsersPage, useProfile } from "./health/Account";
+import { AccountMenu, AccountSheet, AppearancePage, DetailsPage, ImportPage, PasswordPage, PrivacyPage,
+  GoalsPage, ProfilePage, SyncPage, UnitsPage, UsersPage, useProfile } from "./health/Account";
 import { EMPTY_PROFILE, HealthCtx, unitsOf } from "./health/ctx";
 import { asCfg } from "./health/avatar";
 import { BP, useMinWidth } from "./health/ui";
@@ -96,6 +97,7 @@ export default function App() {
   else if (path === "/account/profile") page = <ProfilePage />;
   else if (path === "/account/details") page = <DetailsPage />;
   else if (path === "/account/units") page = <UnitsPage />;
+  else if (path === "/account/goals") page = <GoalsPage />;
   else if (path === "/account/privacy") page = <PrivacyPage />;
   else if (path === "/account/sync") page = <SyncPage />;
   else if (path === "/account/appearance") page = <AppearancePage />;
