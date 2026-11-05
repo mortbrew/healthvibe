@@ -220,4 +220,63 @@ mod integration {
             .unwrap();
         assert_eq!(n, 2);
     }
+
+    #[tokio::test]
+    async fn activity_goals_prefer_one_channel_per_day() {
+        let db = open_memory().await.unwrap();
+        sqlx::query(
+            "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours) VALUES
+             (1, '2024-06-01', 'demo', 500, 30, 12),
+             (1, '2024-06-01', 'export_xml', 650, NULL, 10),
+             (1, '2024-06-01', 'health_auto_export', 700, 45, 11),
+             (1, '2024-06-02', 'unknown', 400, 20, 8),
+             (1, '2024-06-02', 'shortcut', 420, 25, 9),
+             (1, '2024-06-03', 'unknown', 300, 10, 6)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
+            "SELECT date, channel, move_kcal, exercise_min FROM activity_goals_best
+             WHERE user_id = 1 ORDER BY date",
+        )
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        // Whole row from the best channel; a NULL field is not filled from another channel.
+        assert_eq!(
+            rows,
+            vec![
+                ("2024-06-01".into(), "export_xml".into(), Some(650.0), None),
+                ("2024-06-02".into(), "shortcut".into(), Some(420.0), Some(25.0)),
+                ("2024-06-03".into(), "unknown".into(), Some(300.0), Some(10.0)),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn activity_goals_view_matches_rank() {
+        let db = open_memory().await.unwrap();
+        let chans = [EXPORT_XML, HEALTH_AUTO_EXPORT, SHORTCUT, DEMO, UNKNOWN, "other"];
+        for (i, a) in chans.iter().enumerate() {
+            for b in &chans[i + 1..] {
+                let day = format!("2024-01-{:02}", 1 + (rank(a) * 6 + rank(b)) % 28);
+                sqlx::query("DELETE FROM activity_goals").execute(&db).await.unwrap();
+                for c in [a, b] {
+                    sqlx::query("INSERT INTO activity_goals (user_id, date, channel, move_kcal) VALUES (1, ?, ?, 1)")
+                        .bind(&day)
+                        .bind(c)
+                        .execute(&db)
+                        .await
+                        .unwrap();
+                }
+                let got: String = sqlx::query_scalar("SELECT channel FROM activity_goals_best WHERE user_id = 1")
+                    .fetch_one(&db)
+                    .await
+                    .unwrap();
+                let want = if rank(a) <= rank(b) { a } else { b };
+                assert_eq!(rank(&got), rank(want), "{a} vs {b}");
+            }
+        }
+    }
 }

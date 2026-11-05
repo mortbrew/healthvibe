@@ -252,7 +252,7 @@ pub async fn awards(db: &SqlitePool, uid: i64) -> anyhow::Result<Vec<Award>> {
     let energy = daily_sum(db, uid, ACTIVE_ENERGY, &end, 3650).await?;
     // Each day is judged against that day's own Move goal, not the latest one.
     let goals: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT date, move_kcal FROM activity_goals WHERE user_id = ? AND move_kcal IS NOT NULL ORDER BY date",
+        "SELECT date, move_kcal FROM activity_goals_best WHERE user_id = ? AND move_kcal IS NOT NULL ORDER BY date",
     ).bind(uid).fetch_all(db).await?;
     let mut out = vec![];
     let move_days: Vec<(String, bool)> = energy
@@ -355,7 +355,7 @@ pub async fn rings_span(
     ).bind(uid).bind(start).bind(&next).fetch_all(db).await?;
     type Goal = (String, Option<f64>, Option<f64>, Option<f64>);
     let goals: Vec<Goal> = sqlx::query_as(
-        "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals WHERE user_id = ? AND date <= ? ORDER BY date",
+        "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals_best WHERE user_id = ? AND date <= ? ORDER BY date",
     ).bind(uid).bind(end).fetch_all(db).await?;
     let val = |v: &[DayValue], d: &str| v.iter().find(|x| x.date == d).map_or(0.0, |x| x.value);
     Ok((0..days)

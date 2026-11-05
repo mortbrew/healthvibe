@@ -71,8 +71,11 @@ async fn clear_demo(db: &SqlitePool, user_id: i64) -> anyhow::Result<()> {
         .bind(DEMO)
         .execute(db)
         .await?;
-    // Goals are not channel-tagged; only delete ones we tagged via a sentinel
-    // source? activity_goals has no channel. Leave goals and upsert ours.
+    sqlx::query("DELETE FROM activity_goals WHERE user_id = ? AND channel = ?")
+        .bind(user_id)
+        .bind(DEMO)
+        .execute(db)
+        .await?;
     Ok(())
 }
 
@@ -287,9 +290,9 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
 
         // Goals
         sqlx::query(
-            "INSERT INTO activity_goals (user_id, date, move_kcal, exercise_min, stand_hours)
-             VALUES (?, ?, 500, 30, 12)
-             ON CONFLICT (user_id, date) DO UPDATE SET
+            "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
+             VALUES (?, ?, 'demo', 500, 30, 12)
+             ON CONFLICT (user_id, date, channel) DO UPDATE SET
                move_kcal = excluded.move_kcal,
                exercise_min = excluded.exercise_min,
                stand_hours = excluded.stand_hours",

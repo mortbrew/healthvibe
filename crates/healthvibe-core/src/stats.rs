@@ -187,7 +187,7 @@ pub async fn activity(
     // Goals: this day's <ActivitySummary>, else the most recent earlier one,
     // else Apple's defaults.
     let g: Option<(Option<f64>, Option<f64>, Option<f64>)> = sqlx::query_as(
-        "SELECT move_kcal, exercise_min, stand_hours FROM activity_goals
+        "SELECT move_kcal, exercise_min, stand_hours FROM activity_goals_best
          WHERE user_id = ? AND date <= ? ORDER BY date DESC LIMIT 1",
     )
     .bind(user_id)
@@ -735,14 +735,16 @@ mod tests {
             (DEFAULT_MOVE_GOAL, DEFAULT_EXERCISE_GOAL, DEFAULT_STAND_GOAL)
         );
         sqlx::query(
-            "INSERT INTO activity_goals (user_id, date, move_kcal, exercise_min, stand_hours)
-             VALUES (1, '2024-01-01', 650, 45, NULL), (2, '2024-01-02', 900, 60, 8)",
+            "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
+             VALUES (1, '2024-01-01', 'export_xml', 650, 45, NULL),
+                    (1, '2024-01-01', 'demo', 111, 11, 11),
+                    (2, '2024-01-02', 'export_xml', 900, 60, 8)",
         )
         .execute(&db)
         .await
         .unwrap();
-        // Earlier day's goals carry forward; a missing stand goal uses the default;
-        // user 2's goals never apply to user 1.
+        // Earlier day's goals carry forward; export_xml beats demo for the whole row
+        // (its NULL stand goal is not filled from demo); user 2's goals never apply.
         let r = activity(&db, 1, None).await.unwrap().rings.unwrap();
         assert_eq!(
             (r.move_goal, r.exercise_goal, r.stand_goal),

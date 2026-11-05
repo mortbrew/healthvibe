@@ -336,9 +336,9 @@ async fn insert_batch(
             Item::Row(r) => r,
             Item::Goal(g) => {
                 let res = sqlx::query(
-                    "INSERT INTO activity_goals (user_id, date, move_kcal, exercise_min, stand_hours)
-                     VALUES (?, ?, ?, ?, ?)
-                     ON CONFLICT (user_id, date) DO UPDATE SET
+                    "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
+                     VALUES (?, ?, 'export_xml', ?, ?, ?)
+                     ON CONFLICT (user_id, date, channel) DO UPDATE SET
                        move_kcal = excluded.move_kcal,
                        exercise_min = excluded.exercise_min,
                        stand_hours = excluded.stand_hours
@@ -632,7 +632,7 @@ mod tests {
         assert_eq!(n, 5);
         let g: (f64, f64, f64) = sqlx::query_as(
             "SELECT move_kcal, exercise_min, stand_hours FROM activity_goals
-             WHERE user_id = 1 AND date = '2024-01-02'",
+             WHERE user_id = 1 AND date = '2024-01-02' AND channel = 'export_xml'",
         )
         .fetch_one(&db)
         .await

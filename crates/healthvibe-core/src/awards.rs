@@ -638,6 +638,7 @@ pub async fn refresh(db: &SqlitePool, uid: i64) -> anyhow::Result<Vec<AwardOut>>
     let (days, workouts) = load(db, uid).await?;
     let list = compute(&days, &workouts);
     let stamp: String = sqlx::query_scalar(
+        // Raw table count on purpose: any goal write (any channel) invalidates the cache.
         "SELECT (SELECT COUNT(*) || ':' || IFNULL(MAX(id), 0) FROM readings WHERE user_id = ?1) || '/' ||
                 (SELECT COUNT(*) FROM activity_goals WHERE user_id = ?1)",
     ).bind(uid).fetch_one(db).await.unwrap_or_default();
