@@ -93,10 +93,8 @@ export type Night = {
   unspecified_min: number;
   asleep_min: number;
   in_bed_min: number;
-  is_nap?: boolean;
-  start?: string | null;
-  end?: string | null;
-  source?: string;
+  source: string;
+  channel: string;
 };
 export type Workout = {
   id?: number | null;

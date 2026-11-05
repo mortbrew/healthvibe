@@ -270,7 +270,7 @@ pub async fn seed_demo(db: &SqlitePool, opts: SeedOpts) -> anyhow::Result<SeedRe
         // Re-insert with explicit times via raw SQL for sleep.
         report.readings += 1;
 
-        // Nap every 3rd day around 13:00.
+        // Extra daytime sleep sample every 3rd day at 13:00 (stored like any other).
         if d.ordinal().is_multiple_of(3) {
             put_reading(
                 db,
@@ -382,14 +382,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(channels, vec![DEMO.to_string()]);
-        let naps: i64 = sqlx::query_scalar(
+        let daytime: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM readings WHERE user_id = 1 AND type = ? AND local_start LIKE '% 13:%'",
         )
         .bind(SLEEP)
         .fetch_one(&db)
         .await
         .unwrap();
-        assert!(naps >= 1);
+        assert!(daytime >= 1);
         let w: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workouts WHERE user_id = 1")
             .fetch_one(&db)
             .await

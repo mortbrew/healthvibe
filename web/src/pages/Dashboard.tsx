@@ -429,7 +429,7 @@ function SleepCard({ s }: { s: Sleep }) {
               );
             })}
           </div>
-          <p className="muted foot">{s.nights.length}-night average {hm(avg(s.nights.map(asleep)))} asleep</p>
+          <p className="muted foot">Samples ending {last.date} from {last.source || "unknown source"}{last.in_bed_min > 0 ? ` · in bed ${hm(last.in_bed_min)}` : ""}</p>
         </>
       )}
     </section>
