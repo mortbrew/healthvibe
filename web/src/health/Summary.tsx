@@ -5,9 +5,9 @@ import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
 import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, ENERGY, fmtNum, Spark, STEPS, unitLabel, useApi, useBrowse, when } from "./meta";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
-import { Badge, FitRings, ringsOf } from "./rings";
+import { FitRings, ringsOf } from "./rings";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
-import type { AwardOut } from "./Awards";
+import type { AwardsResp } from "./Awards";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
@@ -46,19 +46,20 @@ function Tile({ title, to, children }: { title: string; to: string; children: Re
 }
 
 export default function Summary() {
-  const { user, units } = useHealth();
+  const { units } = useHealth();
   const act = useApi<Activity>("/dashboard/activity");
   const browse = useBrowse();
   const steps = useApi<{ date: string | null; values: number[] }>(hourly(STEPS));
   const dist = useApi<{ date: string | null; values: number[]; unit: string | null }>(hourly(DISTANCE));
-  const awards = useApi<{ enabled: boolean; awards: AwardOut[] }>("/awards");
+  const awards = useApi<AwardsResp>("/awards");
   const wlist = useApi<{ workouts: import("../api").Workout[] }>("/workouts?limit=5");
   const r = act.data?.rings;
   const metrics = browse.data?.metrics ?? [];
   const workouts = metrics.filter((m) => m.metric.startsWith("HKWorkoutActivityType"));
   const lastW = [...workouts].sort((a, b) => (b.latest_at ?? "").localeCompare(a.latest_at ?? ""))[0];
   const totalW = workouts.reduce((a, m) => a + m.count, 0);
-  const latestAward = (awards.data?.awards ?? []).filter((a) => a.earned).sort((a, b) => b.earned!.latest.localeCompare(a.earned!.latest))[0];
+  const marked = (awards.data?.apple_only ?? []).filter((a) => a.earned);
+  const latestAward = [...marked].sort((a, b) => (b.earned_date ?? "").localeCompare(a.earned_date ?? ""))[0];
   const sum = (v?: number[]) => (v ?? []).reduce((a, b) => a + b, 0);
   const [dv, du] = conv(sum(dist.data?.values), dist.data?.unit ?? "mi", units);
 
@@ -111,22 +112,19 @@ export default function Summary() {
           ) : <p className="muted">No workouts yet.</p>}
         </Tile>
         <Tile title="Awards" to="/awards">
-          {awards.data && !awards.data.enabled ? (
-            <p className="muted small">Turn on Awards in your account to earn badges from your history.</p>
-          ) : latestAward ? (
+          {latestAward ? (
             <div className="award-tile">
-              <Badge color={latestAward.color} shape={latestAward.shape} mark={latestAward.mark} size={78} />
               <b>{latestAward.name}</b>
-              <span className="muted small">{longDay(latestAward.earned!.latest)}</span>
+              {latestAward.earned_date && <span className="muted small">{longDay(latestAward.earned_date)}</span>}
+              <span className="muted small">{marked.length} marked as earned</span>
             </div>
-          ) : <p className="muted small">Close your rings to earn awards.</p>}
+          ) : <p className="muted small">Mark the Apple Fitness awards you've earned.</p>}
         </Tile>
       </div>
 
       <Pinned metrics={metrics} />
       <Link to="/browse" className="card linkrow">Show All Health Data <ChevronCircle /></Link>
       <Highlights />
-      {!user.awards_enabled && null}
     </div>
   );
 }

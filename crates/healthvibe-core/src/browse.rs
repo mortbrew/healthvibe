@@ -200,105 +200,6 @@ pub async fn hourly(db: &SqlitePool, uid: i64, kind: &str, date: &str) -> anyhow
     Ok(out)
 }
 
-#[derive(Debug, Serialize, PartialEq)]
-pub struct Award {
-    pub key: &'static str,
-    pub name: String,
-    pub detail: String,
-    pub date: Option<String>,
-}
-
-fn longest_run(days: &[(String, bool)]) -> (usize, Option<String>) {
-    let (mut best, mut cur, mut end) = (0, 0, None);
-    let mut prev: Option<chrono::NaiveDate> = None;
-    for (d, ok) in days {
-        let date = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
-        let consecutive =
-            matches!((prev, date), (Some(p), Some(x)) if x - p == chrono::Duration::days(1));
-        cur = if *ok {
-            if consecutive {
-                cur + 1
-            } else {
-                1
-            }
-        } else {
-            0
-        };
-        if cur > best {
-            best = cur;
-            end = Some(d.clone());
-        }
-        prev = date;
-    }
-    (best, end)
-}
-
-/// The goal in effect on `day`: the most recent goal on or before it, else the default.
-pub(crate) fn goal_on(goals: &[(String, f64)], day: &str) -> f64 {
-    goals
-        .iter()
-        .rev()
-        .find(|g| g.0.as_str() <= day)
-        .map_or(crate::stats::DEFAULT_MOVE_GOAL, |g| g.1)
-}
-
-/// healthvibe's own awards (Apple's are not in the export), newest-earned first.
-pub async fn awards(db: &SqlitePool, uid: i64) -> anyhow::Result<Vec<Award>> {
-    use crate::stats::{daily_sum, ACTIVE_ENERGY, STEPS};
-    let Some(end) = crate::stats::latest_day(db, uid).await? else {
-        return Ok(vec![]);
-    };
-    let steps = daily_sum(db, uid, STEPS, &end, 3650).await?;
-    let energy = daily_sum(db, uid, ACTIVE_ENERGY, &end, 3650).await?;
-    // Each day is judged against that day's own Move goal, not the latest one.
-    let goals: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT date, move_kcal FROM activity_goals_best WHERE user_id = ? AND move_kcal IS NOT NULL ORDER BY date",
-    ).bind(uid).fetch_all(db).await?;
-    let mut out = vec![];
-    let move_days: Vec<(String, bool)> = energy
-        .iter()
-        .map(|d| (d.date.clone(), d.value >= goal_on(&goals, &d.date)))
-        .collect();
-    let (run, run_end) = longest_run(&move_days);
-    if run >= 7 {
-        out.push(Award {
-            key: "perfect_week",
-            name: "Perfect Week (Move)".into(),
-            detail: format!("Closed your Move ring {run} days in a row"),
-            date: run_end.clone(),
-        });
-    }
-    if run >= 2 {
-        out.push(Award {
-            key: "move_streak",
-            name: format!("{run}-Day Move Streak"),
-            detail: "Longest Move streak".into(),
-            date: run_end,
-        });
-    }
-    if let Some(best) = steps.iter().max_by(|a, b| a.value.total_cmp(&b.value)) {
-        out.push(Award {
-            key: "record_steps",
-            name: "New Step Record".into(),
-            detail: format!("{} steps", best.value.round() as i64),
-            date: Some(best.date.clone()),
-        });
-    }
-    if let Some(d) = steps.iter().rev().find(|d| d.value >= 10_000.0) {
-        out.push(Award {
-            key: "ten_k",
-            name: "10,000 Steps".into(),
-            detail: format!(
-                "{} days over 10k",
-                steps.iter().filter(|d| d.value >= 10_000.0).count()
-            ),
-            date: Some(d.date.clone()),
-        });
-    }
-    out.sort_by(|a, b| b.date.cmp(&a.date));
-    Ok(out)
-}
-
 #[derive(Debug, Serialize)]
 pub struct RingDay {
     pub date: String,
@@ -379,17 +280,6 @@ pub async fn rings_span(
 #[cfg(test)]
 mod tests {
     use super::category;
-    #[allow(unused_imports)]
-    use super::longest_run;
-    #[test]
-    fn goal_on_uses_most_recent_goal_on_or_before_day() {
-        let g = vec![("2026-01-05".to_string(), 400.0), ("2026-01-10".to_string(), 900.0)];
-        assert_eq!(super::goal_on(&g, "2026-01-01"), crate::stats::DEFAULT_MOVE_GOAL);
-        assert_eq!(super::goal_on(&g, "2026-01-05"), 400.0);
-        assert_eq!(super::goal_on(&g, "2026-01-09"), 400.0);
-        assert_eq!(super::goal_on(&g, "2026-01-10"), 900.0);
-        assert_eq!(super::goal_on(&g, "2026-02-01"), 900.0);
-    }
     #[test]
     fn categories() {
         assert_eq!(category("HKQuantityTypeIdentifierStepCount"), "activity");
@@ -409,17 +299,5 @@ mod tests {
             "respiratory"
         );
         assert_eq!(category("healthvibe.hae.tooth_brushing"), "other");
-    }
-    #[test]
-    fn runs() {
-        let d = |s: &str, ok| (s.to_string(), ok);
-        let v = vec![
-            d("2026-01-01", true),
-            d("2026-01-02", true),
-            d("2026-01-04", true),
-            d("2026-01-05", true),
-            d("2026-01-06", true),
-        ];
-        assert_eq!(super::longest_run(&v), (3, Some("2026-01-06".into())));
     }
 }

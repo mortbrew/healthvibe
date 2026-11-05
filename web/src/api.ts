@@ -9,7 +9,6 @@ export type User = {
   theme_light: string;
   theme_dark: string;
   onboarding_done: boolean;
-  awards_enabled: boolean;
 };
 
 export class ApiError extends Error {

@@ -41,7 +41,7 @@ export function AccountMenu() {
       <Group>
         <Row to="/account/sync" label="iPhone Sync (Health Auto Export)" tone="green" />
         <Row to="/settings/import" label="Import Health Data" tone="green" />
-        <Row to="/account/awards" label="Awards" tone="green" />
+        <Row to="/awards" label="Awards" tone="green" />
       </Group>
       {user.is_admin && <Group><Row to="/settings/users" label="Users" /></Group>}
       <Group>
@@ -153,28 +153,11 @@ export function PrivacyPage() {
       <Group title="Sessions"><Row onClick={revoke} label="Sign Out Other Devices" tone="blue" /></Group>
       <section className="card danger">
         <h3>Delete My Data</h3>
-        <p className="muted small">Deletes all readings, goals, pins and awards for your account. Your login stays. Type <b>{user.username}</b> to confirm.</p>
+        <p className="muted small">Deletes all readings, workouts, goals, pins and marked awards for your account. Your login stays. Type <b>{user.username}</b> to confirm.</p>
         <input value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Confirm username" />
         <button className="pill red" disabled={confirm !== user.username} onClick={del}>Delete Everything</button>
       </section>
       {msg && <p className="muted">{msg}</p>}
-    </Sub>
-  );
-}
-
-export function AwardsSetting() {
-  const { user, onUser } = useHealth();
-  const [busy, setBusy] = useState(false);
-  const set = async (enabled: boolean) => {
-    setBusy(true);
-    try { onUser(await api<User>("/me/awards", { method: "PUT", body: { enabled } })); } finally { setBusy(false); }
-  };
-  return (
-    <Sub title="Awards">
-      <Group foot="Awards are computed from your history. They work best after importing the full export.zip from the Health app.">
-        <label className="row static"><span className="row-label">Awards</span><input type="checkbox" className="switch" checked={user.awards_enabled} disabled={busy} onChange={(e) => set(e.target.checked)} /></label>
-        {user.awards_enabled && <Row to="/awards" label="View Awards" />}
-      </Group>
     </Sub>
   );
 }

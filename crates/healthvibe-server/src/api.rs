@@ -52,7 +52,6 @@ pub fn routes() -> Router<AppState> {
         .route("/hourly", get(hourly))
         .route("/awards", get(awards))
         .route("/awards/apple/{key}", put(set_apple_award))
-        .route("/me/awards", put(set_awards_enabled))
         .route("/profile", get(get_profile).put(put_profile))
         .route("/me/export.csv", get(export_csv))
         .route("/me/data", axum::routing::delete(delete_data))
@@ -741,14 +740,9 @@ async fn awards(State(st): State<AppState>, User(u): User) -> ApiResult {
             json!({ "key": k, "name": n, "description": d, "earned": m.is_some(), "earned_date": m.and_then(|m| m.1.clone()) })
         })
         .collect();
-    if !u.awards_enabled {
-        return Ok(Json(
-            json!({ "enabled": false, "awards": [], "apple_only": apple }),
-        ));
-    }
-    Ok(Json(
-        json!({ "enabled": true, "awards": aw::refresh(&st.db, u.id).await?, "apple_only": apple }),
-    ))
+    // Only awards the user marked as earned in Apple Fitness; nothing is
+    // computed from health data.
+    Ok(Json(json!({ "apple_only": apple })))
 }
 
 #[derive(Deserialize)]
@@ -781,32 +775,6 @@ async fn set_apple_award(
             .await?;
     }
     Ok(Json(json!({ "ok": true })))
-}
-
-#[derive(Deserialize)]
-struct Enabled {
-    enabled: bool,
-}
-
-async fn set_awards_enabled(
-    State(st): State<AppState>,
-    User(u): User,
-    Json(b): Json<Enabled>,
-) -> ApiResult {
-    sqlx::query("UPDATE users SET awards_enabled = ? WHERE id = ?")
-        .bind(b.enabled)
-        .bind(u.id)
-        .execute(&st.db)
-        .await?;
-    if b.enabled {
-        // Full recompute on enable.
-        sqlx::query("DELETE FROM awards_state WHERE user_id = ?")
-            .bind(u.id)
-            .execute(&st.db)
-            .await?;
-        aw::refresh(&st.db, u.id).await?;
-    }
-    Ok(Json(json!({ "user": auth::get_user(&st.db, u.id).await? })))
 }
 
 async fn get_profile(State(st): State<AppState>, User(u): User) -> ApiResult {
@@ -877,7 +845,7 @@ struct Confirm {
 }
 
 /// Delete all of this user's health data (readings, workouts, goals, raw uploads awaiting
-/// parse, sync cursors, awards). Keeps the account, profile and devices.
+/// parse, sync cursors, marked Apple awards). Keeps the account, profile and devices.
 async fn delete_data(
     State(st): State<AppState>,
     User(u): User,
@@ -893,8 +861,7 @@ async fn delete_data(
         "activity_goals",
         "ingest_raw",
         "sync_cursors",
-        "user_awards",
-        "awards_state",
+        "apple_awards",
         "pinned_metrics",
     ] {
         sqlx::query(&format!("DELETE FROM {t} WHERE user_id = ?"))

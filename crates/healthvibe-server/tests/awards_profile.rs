@@ -112,115 +112,37 @@ async fn reading(db: &sqlx::SqlitePool, uid: i64, kind: &str, v: &str, day: &str
 
 const ENERGY: &str = "HKQuantityTypeIdentifierActiveEnergyBurned";
 
-fn find<'a>(v: &'a Value, key: &str) -> &'a Value {
-    v["awards"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|a| a["key"] == key)
-        .unwrap()
-}
-
 #[tokio::test]
-async fn awards_opt_in_perfect_week_streak_and_isolation() {
+async fn no_awards_are_computed_from_data() {
     let (app, db) = app().await;
-    let (admin, sam) = two_users(&app).await;
-    // Mon 2026-01-05 .. Sun 2026-01-11 all over the 500 default Move goal; then a miss; then 2 more.
+    let (admin, _sam) = two_users(&app).await;
+    // A week of big Move days and a workout: nothing here becomes an award.
     for d in 5..=14 {
-        let kcal = if d == 12 {
-            "100"
-        } else if d == 14 {
-            "2600"
-        } else {
-            "600"
-        };
-        reading(&db, 1, ENERGY, kcal, &format!("2026-01-{d:02}"), 0).await;
+        reading(&db, 1, ENERGY, "2600", &format!("2026-01-{d:02}"), 0).await;
     }
-    reading(
-        &db,
-        1,
-        "HKWorkoutActivityTypeRunning",
-        "30",
-        "2026-01-06",
-        1,
-    )
-    .await;
-
+    reading(&db, 1, "HKWorkoutActivityTypeRunning", "30", "2026-01-06", 1).await;
     let (s, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
     assert_eq!(s, 200);
-    assert_eq!(v["enabled"], false);
-    assert_eq!(v["awards"], json!([]));
-    assert!(v["apple_only"].as_array().unwrap().len() >= 5);
-
-    let (s, v, _) = call(
-        &app,
-        "PUT",
-        "/api/v1/me/awards",
-        Some(&admin),
-        Some(json!({"enabled": true})),
-    )
-    .await;
-    assert_eq!(
-        (s, &v["user"]["awards_enabled"]),
-        (StatusCode::OK, &json!(true))
-    );
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    assert_eq!(v["enabled"], true);
-    assert_eq!(
-        find(&v, "perfect_week_move")["earned"]["first"],
-        "2026-01-11"
-    );
-    assert_eq!(find(&v, "move_streak_7")["earned"]["count"], 1);
-    assert_eq!(find(&v, "close_move")["earned"]["count"], 9);
-    assert_eq!(find(&v, "move_500pct")["earned"]["latest"], "2026-01-14");
-    assert_eq!(find(&v, "longest_move_streak")["detail"], "7 days");
-    assert_eq!(find(&v, "first_Running")["earned"]["first"], "2026-01-06");
-    assert!(find(&v, "perfect_week_exercise")["earned"].is_null());
-    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_awards WHERE user_id = 1")
-        .fetch_one(&db)
-        .await
-        .unwrap();
-    assert!(stored >= 6);
-
-    // Per-day goals: a higher Move goal from 2026-01-13 on applies only from
-    // that day. The earlier week still counts against its own (default) goal.
-    sqlx::query("INSERT INTO activity_goals (user_id, date, move_kcal) VALUES (1, '2026-01-13', 1000)")
-        .execute(&db)
-        .await
-        .unwrap();
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
-    assert_eq!(
-        find(&v, "perfect_week_move")["earned"]["first"],
-        "2026-01-11"
-    );
-    // Days 5-11 (7) + 14 (2600 >= 1000); 13 (600 < 1000) no longer closes.
-    assert_eq!(find(&v, "close_move")["earned"]["count"], 8);
-    let (_, v, _) = call(
-        &app,
-        "GET",
-        "/api/v1/rings?start=2026-01-11&end=2026-01-13",
-        Some(&admin),
-        None,
-    )
-    .await;
-    assert_eq!(v["days"][0]["move_goal"], 500.0);
-    assert_eq!(v["days"][2]["move_goal"], 1000.0);
-
-    // Sam sees nothing of admin's data.
-    call(
-        &app,
-        "PUT",
-        "/api/v1/me/awards",
-        Some(&sam),
-        Some(json!({"enabled": true})),
-    )
-    .await;
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&sam), None).await;
-    assert!(v["awards"]
+    let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+    assert_eq!(keys, vec!["apple_only"]);
+    assert!(v["apple_only"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|a| a["earned"].is_null()));
+        .all(|a| a["earned"] == false));
+    // The old opt-in switch and its flag are gone.
+    let (s, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/me/awards",
+        Some(&admin),
+        Some(json!({"enabled": true})),
+    )
+    .await;
+    assert_ne!(s, StatusCode::OK);
+    let (s, v, _) = call(&app, "GET", "/api/v1/session", Some(&admin), None).await;
+    assert_eq!((s, &v["user"]["username"]), (StatusCode::OK, &json!("toby")));
+    assert!(v["user"].get("awards_enabled").is_none());
     assert_eq!(
         call(&app, "GET", "/api/v1/awards", None, None).await.0,
         StatusCode::UNAUTHORIZED
@@ -383,6 +305,11 @@ async fn privacy_export_delete_and_sessions() {
         .execute(&db)
         .await
         .unwrap();
+        sqlx::query("INSERT INTO apple_awards (user_id, key, earned_date) VALUES (?, 'sharing', NULL)")
+            .bind(uid)
+            .execute(&db)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO ingest_raw (user_id, received_at, body, status) VALUES (?, '2026-01-01T00:00:00Z', x'00', 'failed')")
             .bind(uid)
             .execute(&db)
@@ -418,7 +345,7 @@ async fn privacy_export_delete_and_sessions() {
         .await
         .unwrap();
     assert_eq!(left, vec![2]);
-    for table in ["workouts", "ingest_raw"] {
+    for table in ["workouts", "ingest_raw", "apple_awards"] {
         let left: Vec<i64> = sqlx::query_scalar(&format!("SELECT user_id FROM {table}"))
             .fetch_all(&db)
             .await

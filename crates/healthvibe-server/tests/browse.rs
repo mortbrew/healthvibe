@@ -179,26 +179,10 @@ async fn browse_records_paginate_and_are_per_user() {
     )
     .await;
     assert_eq!(v["values"][8], 0.0);
-    for c in [&admin, &sam] {
-        let b = Some(json!({ "enabled": true }));
-        assert_eq!(
-            call(&app, "PUT", "/api/v1/me/awards", Some(c), b).await.0,
-            200
-        );
-    }
+    // No awards are computed from the step data.
     let (s, v, _) = call(&app, "GET", "/api/v1/awards", Some(&admin), None).await;
     assert_eq!(s, 200);
-    assert!(v["awards"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|a| a["key"] == "record_steps"));
-    let (_, v, _) = call(&app, "GET", "/api/v1/awards", Some(&sam), None).await;
-    assert!(v["awards"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|a| a["earned"].is_null()));
+    assert!(v.get("awards").is_none());
 
     reading(
         &db,
