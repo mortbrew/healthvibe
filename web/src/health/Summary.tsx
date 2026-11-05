@@ -59,7 +59,8 @@ export default function Summary() {
   const sum = (v?: number[]) => (v ?? []).reduce((a, b) => a + b, 0);
   const [dv, du] = conv(sum(dist.data?.values), dist.data?.unit ?? "mi", units);
 
-  const showAlert = r != null && r.date === today() && noGoals(r);
+  // Empty account (no rings) or today's rings lack goals — prompt once per session.
+  const showAlert = noGoals(r) && (r == null || r.date === today());
   return (
     <div className="page summary">
       <LargeTitle title="Summary" eyebrow={new Date().toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }).toUpperCase()} />
@@ -75,7 +76,7 @@ export default function Summary() {
           </dl>
         </div>
         {r && <GoalFrom r={r} />}
-        {r && noGoals(r) && <p className="muted small">No ring goals for this day. <span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Set goals</span></p>}
+        {noGoals(r) && <p className="muted small">No ring goals for this day. <span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Set goals</span></p>}
         {r && !noGoals(r) && <p className="muted small"><span className="linkish" onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate("/account/goals"); }}>Edit goals</span></p>}
         {r && r.date !== today() && <p className="muted small">Latest data: {dayTitle(r.date)}</p>}
       </Link>
@@ -376,7 +377,7 @@ export function ActivityDay({ date }: { date: string }) {
       </div>
       <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} /></div>
       {r && <GoalFrom r={r} className="center" />}
-      {r && <p className="muted small center"><Link to="/account/goals">{noGoals(r) ? "Set goals" : "Edit goals"}</Link></p>}
+      {(r || date === today()) && <p className="muted small center"><Link to="/account/goals">{noGoals(r) ? "Set goals" : "Edit goals"}</Link></p>}
       <div className="act-charts">
       <section className="actsec">
         <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>

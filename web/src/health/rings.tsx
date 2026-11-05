@@ -112,6 +112,6 @@ export function GoalFrom({ r, className }: { r: GoalFromDates; className?: strin
   return <p className={`muted small goalfrom ${className ?? ""}`.trim()} title={title}>{bits.join(" · ")}</p>;
 }
 
-/** True when none of the three rings has a resolved goal. */
+/** True when there is no rings payload, or none of the three rings has a resolved goal. */
 export const noGoals = (r: { move_goal: number | null; exercise_goal: number | null; stand_goal: number | null } | null | undefined) =>
-  !!r && r.move_goal == null && r.exercise_goal == null && r.stand_goal == null;
+  !r || (r.move_goal == null && r.exercise_goal == null && r.stand_goal == null);
