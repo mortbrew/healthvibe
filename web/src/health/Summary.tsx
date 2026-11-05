@@ -5,13 +5,13 @@ import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
 import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, ENERGY, fmtNum, Spark, STEPS, unitLabel, useApi, useBrowse, when } from "./meta";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
-import { FitRings, ringsOf } from "./rings";
+import { FitRings, ofGoal, ringsOf } from "./rings";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
 import type { AwardsResp } from "./Awards";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
-export type RingDay = { date: string; move_kcal: number; move_goal: number; exercise_min: number; exercise_goal: number; stand_hours: number; stand_goal: number; workout: boolean };
+export type RingDay = { date: string; move_kcal: number; move_goal: number | null; exercise_min: number; exercise_goal: number | null; stand_hours: number; stand_goal: number | null; workout: boolean };
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const longDay = (d: string) => new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
@@ -71,11 +71,12 @@ export default function Summary() {
         <div className="ringrow">
           <FitRings v={r ? ringsOf(r) : null} size={150} />
           <dl className="ringstats">
-            <div><dt>Move</dt><dd style={{ color: "var(--move)" }}><span className="num">{r ? n0(r.move_kcal) : "--"}/{r ? n0(r.move_goal) : "--"}</span><small>CAL</small></dd></div>
-            <div><dt>Exercise</dt><dd style={{ color: "var(--exercise)" }}><span className="num">{r ? n0(r.exercise_min) : "--"}/{r ? n0(r.exercise_goal) : "--"}</span><small>MIN</small></dd></div>
-            <div><dt>Stand</dt><dd style={{ color: "var(--stand)" }}><span className="num">{r ? n0(r.stand_hours) : "--"}/{r ? n0(r.stand_goal) : "--"}</span><small>HRS</small></dd></div>
+            <div><dt>Move</dt><dd style={{ color: "var(--move)" }}><span className="num">{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}</span><small>CAL</small></dd></div>
+            <div><dt>Exercise</dt><dd style={{ color: "var(--exercise)" }}><span className="num">{r ? `${n0(r.exercise_min)}${ofGoal(r.exercise_goal)}` : "--"}</span><small>MIN</small></dd></div>
+            <div><dt>Stand</dt><dd style={{ color: "var(--stand)" }}><span className="num">{r ? `${n0(r.stand_hours)}${ofGoal(r.stand_goal)}` : "--"}</span><small>HRS</small></dd></div>
           </dl>
         </div>
+        {r && r.move_goal == null && r.exercise_goal == null && r.stand_goal == null && <p className="muted small">No ring goals in your data for this day.</p>}
         {r && r.date !== today() && <p className="muted small">Latest data: {dayTitle(r.date)}</p>}
       </Link>
 
@@ -383,17 +384,17 @@ export function ActivityDay({ date }: { date: string }) {
       <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} /></div>
       <div className="act-charts">
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}/${n0(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>
+        <div className="as-head"><div><p className="as-label">Move</p><p className="as-val num" style={{ color: "var(--move)" }}>{r ? `${n0(r.move_kcal)}${ofGoal(r.move_goal)}` : "--"}<small>CAL</small></p></div></div>
         <HourChart values={mv.data?.values ?? Array(24).fill(0)} color="var(--move)" kind="bar" />
         <p className="as-total">TOTAL {r ? n0(r.move_kcal) : 0} CAL</p>
       </section>
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Exercise</p><p className="as-val num" style={{ color: "var(--exercise)" }}>{r ? `${n0(r.exercise_min)}/${n0(r.exercise_goal)}` : "--"}<small>MIN</small></p></div></div>
+        <div className="as-head"><div><p className="as-label">Exercise</p><p className="as-val num" style={{ color: "var(--exercise)" }}>{r ? `${n0(r.exercise_min)}${ofGoal(r.exercise_goal)}` : "--"}<small>MIN</small></p></div></div>
         <HourChart values={ex.data?.values ?? Array(24).fill(0)} color="var(--exercise)" kind="bar" />
         <p className="as-total">TOTAL {hmTot(r?.exercise_min ?? 0)}</p>
       </section>
       <section className="actsec">
-        <div className="as-head"><div><p className="as-label">Stand</p><p className="as-val num" style={{ color: "var(--stand)" }}>{r ? `${n0(r.stand_hours)}/${n0(r.stand_goal)}` : "--"}<small>HRS</small></p></div></div>
+        <div className="as-head"><div><p className="as-label">Stand</p><p className="as-val num" style={{ color: "var(--stand)" }}>{r ? `${n0(r.stand_hours)}${ofGoal(r.stand_goal)}` : "--"}<small>HRS</small></p></div></div>
         <HourChart values={st.data?.values ?? Array(24).fill(0)} color="var(--stand)" kind="block" />
       </section>
       </div>

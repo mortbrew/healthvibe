@@ -22,9 +22,6 @@ pub const WEIGHT: &str = "HKQuantityTypeIdentifierBodyMass";
 pub const BODY_FAT: &str = "HKQuantityTypeIdentifierBodyFatPercentage";
 pub const LEAN_MASS: &str = "HKQuantityTypeIdentifierLeanBodyMass";
 
-pub const DEFAULT_MOVE_GOAL: f64 = 500.0;
-pub const DEFAULT_EXERCISE_GOAL: f64 = 30.0;
-pub const DEFAULT_STAND_GOAL: f64 = 12.0;
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct DayValue {
@@ -120,11 +117,12 @@ pub async fn daily_avg(
 pub struct Rings {
     pub date: String,
     pub move_kcal: f64,
-    pub move_goal: f64,
+    /// Goals only from that exact day's ActivitySummary; None if it has none.
+    pub move_goal: Option<f64>,
     pub exercise_min: f64,
-    pub exercise_goal: f64,
+    pub exercise_goal: Option<f64>,
     pub stand_hours: f64,
-    pub stand_goal: f64,
+    pub stand_goal: Option<f64>,
     pub steps: f64,
 }
 
@@ -184,11 +182,10 @@ pub async fn activity(
     .bind(shift(&date, 1))
     .fetch_one(db)
     .await?;
-    // Goals: this day's <ActivitySummary>, else the most recent earlier one,
-    // else Apple's defaults.
+    // Goals: only this exact day's <ActivitySummary>. No carry-forward, no defaults.
     let g: Option<(Option<f64>, Option<f64>, Option<f64>)> = sqlx::query_as(
         "SELECT move_kcal, exercise_min, stand_hours FROM activity_goals_best
-         WHERE user_id = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+         WHERE user_id = ? AND date = ?",
     )
     .bind(user_id)
     .bind(&date)
@@ -198,11 +195,11 @@ pub async fn activity(
     let rings = Rings {
         date: date.clone(),
         move_kcal: on(&energy, &date),
-        move_goal: gm.unwrap_or(DEFAULT_MOVE_GOAL),
+        move_goal: gm,
         exercise_min: on(&exercise, &date),
-        exercise_goal: ge.unwrap_or(DEFAULT_EXERCISE_GOAL),
+        exercise_goal: ge,
         stand_hours: stand as f64,
-        stand_goal: gs.unwrap_or(DEFAULT_STAND_GOAL),
+        stand_goal: gs,
         steps: on(&steps, &date),
     };
     Ok(Activity {
@@ -567,38 +564,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ring_goals_from_activity_summary_with_defaults() {
+    async fn ring_goals_only_from_that_days_activity_summary() {
         let db = seeded().await;
+        let latest = latest_day(&db, 1).await.unwrap().unwrap();
         let r = activity(&db, 1, None).await.unwrap().rings.unwrap();
-        assert_eq!(
-            (r.move_goal, r.exercise_goal, r.stand_goal),
-            (DEFAULT_MOVE_GOAL, DEFAULT_EXERCISE_GOAL, DEFAULT_STAND_GOAL)
-        );
+        // No ActivitySummary: no goal at all (no default).
+        assert_eq!((r.move_goal, r.exercise_goal, r.stand_goal), (None, None, None));
         sqlx::query(
             "INSERT INTO activity_goals (user_id, date, channel, move_kcal, exercise_min, stand_hours)
-             VALUES (1, '2024-01-01', 'export_xml', 650, 45, NULL),
-                    (1, '2024-01-01', 'demo', 111, 11, 11),
-                    (2, '2024-01-02', 'export_xml', 900, 60, 8)",
+             VALUES (1, ?, 'export_xml', 650, 45, NULL),
+                    (1, ?, 'demo', 111, 11, 11),
+                    (1, '2000-01-01', 'export_xml', 999, 99, 9),
+                    (2, ?, 'export_xml', 900, 60, 8)",
         )
+        .bind(&latest)
+        .bind(&latest)
+        .bind(&latest)
         .execute(&db)
         .await
         .unwrap();
-        // Earlier day's goals carry forward; export_xml beats demo for the whole row
-        // (its NULL stand goal is not filled from demo); user 2's goals never apply.
+        // export_xml beats demo for the whole row (its NULL stand goal is not
+        // filled from demo); user 2's goals never apply.
         let r = activity(&db, 1, None).await.unwrap().rings.unwrap();
         assert_eq!(
             (r.move_goal, r.exercise_goal, r.stand_goal),
-            (650.0, 45.0, 12.0)
+            (Some(650.0), Some(45.0), None)
         );
-        let r2 = activity(&db, 2, Some("2024-01-02".into()))
+        // An earlier day's goal does not carry forward to a later day.
+        let r = activity(&db, 1, Some("2000-01-02".into()))
             .await
             .unwrap()
             .rings
             .unwrap();
-        assert_eq!(
-            (r2.move_goal, r2.exercise_goal, r2.stand_goal),
-            (900.0, 60.0, 8.0)
-        );
+        assert_eq!((r.move_goal, r.exercise_goal, r.stand_goal), (None, None, None));
     }
 
     #[tokio::test]

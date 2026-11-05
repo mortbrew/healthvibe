@@ -68,11 +68,11 @@ export type Activity = {
   rings: null | {
     date: string;
     move_kcal: number;
-    move_goal: number;
+    move_goal: number | null;
     exercise_min: number;
-    exercise_goal: number;
+    exercise_goal: number | null;
     stand_hours: number;
-    stand_goal: number;
+    stand_goal: number | null;
     steps: number;
   };
   steps: DayValue[];

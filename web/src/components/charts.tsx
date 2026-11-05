@@ -3,22 +3,25 @@
 
 import { DayValue } from "../api";
 
-export function Ring(props: { value: number; goal: number; color: string; r: number; width: number }) {
+/** One ring. With no goal (none in the imported data) only the track is drawn. */
+export function Ring(props: { value: number; goal: number | null; color: string; r: number; width: number }) {
   const c = 2 * Math.PI * props.r;
-  const frac = props.goal > 0 ? props.value / props.goal : 0;
+  const frac = props.goal != null && props.goal > 0 ? props.value / props.goal : 0;
   const shown = Math.min(frac, 1);
   return (
     <g>
       <circle r={props.r} fill="none" stroke={props.color} strokeOpacity={0.2} strokeWidth={props.width} />
-      <circle
-        r={props.r}
-        fill="none"
-        stroke={props.color}
-        strokeWidth={props.width}
-        strokeLinecap="round"
-        strokeDasharray={`${c * shown} ${c}`}
-        transform="rotate(-90)"
-      />
+      {shown > 0 && (
+        <circle
+          r={props.r}
+          fill="none"
+          stroke={props.color}
+          strokeWidth={props.width}
+          strokeLinecap="round"
+          strokeDasharray={`${c * shown} ${c}`}
+          transform="rotate(-90)"
+        />
+      )}
       {frac > 1 && (
         // Overlap marker for goals exceeded, like Apple's second lap.
         <circle
@@ -36,7 +39,7 @@ export function Ring(props: { value: number; goal: number; color: string; r: num
   );
 }
 
-export function Rings(props: { move: [number, number]; exercise: [number, number]; stand: [number, number]; size?: number }) {
+export function Rings(props: { move: [number, number | null]; exercise: [number, number | null]; stand: [number, number | null]; size?: number }) {
   const size = props.size ?? 180;
   const w = size * 0.11;
   const gap = w * 1.12;

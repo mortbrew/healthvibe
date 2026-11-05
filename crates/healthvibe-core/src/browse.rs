@@ -204,11 +204,11 @@ pub async fn hourly(db: &SqlitePool, uid: i64, kind: &str, date: &str) -> anyhow
 pub struct RingDay {
     pub date: String,
     pub move_kcal: f64,
-    pub move_goal: f64,
+    pub move_goal: Option<f64>,
     pub exercise_min: f64,
-    pub exercise_goal: f64,
+    pub exercise_goal: Option<f64>,
     pub stand_hours: f64,
-    pub stand_goal: f64,
+    pub stand_goal: Option<f64>,
     pub workout: bool,
 }
 
@@ -222,8 +222,8 @@ pub async fn rings(
     rings_span(db, uid, start, end, 400).await
 }
 
-/// Like [`rings`] with a caller-chosen day cap. Each day uses its own goal from
-/// ActivitySummary data (most recent on or before that day), else the defaults.
+/// Like [`rings`] with a caller-chosen day cap. Each day's goals come only from
+/// that day's own ActivitySummary; a day without one has no goal.
 pub async fn rings_span(
     db: &SqlitePool,
     uid: i64,
@@ -256,20 +256,20 @@ pub async fn rings_span(
     ).bind(uid).bind(start).bind(&next).fetch_all(db).await?;
     type Goal = (String, Option<f64>, Option<f64>, Option<f64>);
     let goals: Vec<Goal> = sqlx::query_as(
-        "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals_best WHERE user_id = ? AND date <= ? ORDER BY date",
-    ).bind(uid).bind(end).fetch_all(db).await?;
+        "SELECT date, move_kcal, exercise_min, stand_hours FROM activity_goals_best WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date",
+    ).bind(uid).bind(start).bind(end).fetch_all(db).await?;
     let val = |v: &[DayValue], d: &str| v.iter().find(|x| x.date == d).map_or(0.0, |x| x.value);
     Ok((0..days)
         .map(|i| {
             let d = (s + chrono::Duration::days(i)).to_string();
-            let g = goals.iter().rev().find(|g| g.0 <= d);
+            let g = goals.iter().find(|g| g.0 == d);
             RingDay {
                 move_kcal: val(&energy, &d),
-                move_goal: g.and_then(|g| g.1).unwrap_or(DEFAULT_MOVE_GOAL),
+                move_goal: g.and_then(|g| g.1),
                 exercise_min: val(&exercise, &d),
-                exercise_goal: g.and_then(|g| g.2).unwrap_or(DEFAULT_EXERCISE_GOAL),
+                exercise_goal: g.and_then(|g| g.2),
                 stand_hours: stand.iter().find(|x| x.0 == d).map_or(0.0, |x| x.1),
-                stand_goal: g.and_then(|g| g.3).unwrap_or(DEFAULT_STAND_GOAL),
+                stand_goal: g.and_then(|g| g.3),
                 workout: workouts.contains(&d),
                 date: d,
             }

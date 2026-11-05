@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Activity, api, Body, Dashboard as Dash, explain, Heart, Metric, SeriesData, Sleep, Widget } from "../api";
 import { Bars, Hypnogram, Lines, Rings, STAGES } from "../components/charts";
 import { Link } from "../router";
+import { ofGoal } from "../health/rings";
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const hm = (min: number) => `${Math.floor(min / 60)}h ${String(Math.round(min % 60)).padStart(2, "0")}m`;
@@ -358,15 +359,15 @@ function ActivityCard({ a }: { a: Activity }) {
           <dl className="ring-stats">
             <div>
               <dt>Move</dt>
-              <dd style={{ color: "var(--move)" }}>{n0(r.move_kcal)}<small>/{n0(r.move_goal)} kcal</small></dd>
+              <dd style={{ color: "var(--move)" }}>{n0(r.move_kcal)}<small>{ofGoal(r.move_goal)} kcal</small></dd>
             </div>
             <div>
               <dt>Exercise</dt>
-              <dd style={{ color: "var(--exercise)" }}>{n0(r.exercise_min)}<small>/{r.exercise_goal} min</small></dd>
+              <dd style={{ color: "var(--exercise)" }}>{n0(r.exercise_min)}<small>{ofGoal(r.exercise_goal)} min</small></dd>
             </div>
             <div>
               <dt>Stand</dt>
-              <dd style={{ color: "var(--stand)" }}>{n0(r.stand_hours)}<small>/{r.stand_goal} hr</small></dd>
+              <dd style={{ color: "var(--stand)" }}>{n0(r.stand_hours)}<small>{ofGoal(r.stand_goal)} hr</small></dd>
             </div>
           </dl>
         </div>

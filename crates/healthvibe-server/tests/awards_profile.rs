@@ -247,8 +247,9 @@ async fn profile_round_trip_isolation_and_validation() {
             400
         );
     }
-    // Goals come only from ActivitySummary data: an earlier day's goal carries forward.
-    sqlx::query("INSERT INTO activity_goals (user_id, date, stand_hours) VALUES (1, '2026-01-01', 10)")
+    // Goals come only from that exact day's ActivitySummary: an earlier day's
+    // goal does not carry forward and there is no default.
+    sqlx::query("INSERT INTO activity_goals (user_id, date, stand_hours) VALUES (1, '2026-01-01', 10), (1, '2026-01-06', 11)")
         .execute(&db)
         .await
         .unwrap();
@@ -256,12 +257,15 @@ async fn profile_round_trip_isolation_and_validation() {
     let (_, v, _) = call(
         &app,
         "GET",
-        "/api/v1/rings?start=2026-01-05&end=2026-01-05",
+        "/api/v1/rings?start=2026-01-05&end=2026-01-06",
         Some(&admin),
         None,
     )
     .await;
-    assert_eq!(v["days"][0]["stand_goal"], 10.0);
+    assert!(v["days"][0]["stand_goal"].is_null());
+    assert!(v["days"][0]["move_goal"].is_null());
+    assert_eq!(v["days"][0]["move_kcal"], 10.0);
+    assert_eq!(v["days"][1]["stand_goal"], 11.0);
     let (_, v, _) = call(
         &app,
         "GET",
@@ -270,7 +274,8 @@ async fn profile_round_trip_isolation_and_validation() {
         None,
     )
     .await;
-    assert_eq!(v["rings"]["stand_goal"], 10.0);
+    assert!(v["rings"]["stand_goal"].is_null());
+    assert_eq!(v["rings"]["move_kcal"], 10.0);
 }
 
 #[tokio::test]
