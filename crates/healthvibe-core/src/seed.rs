@@ -131,70 +131,64 @@ async fn put_reading(
 }
 
 /// One Watch-style night ending the morning of `end_day`: Awake / REM / Core / Deep.
-/// Segments stay in the overnight window (no daytime samples). Returns rows inserted.
+/// Every segment's `local_end` is on `end_day` so end-date attribution shows the
+/// full evening→morning window (no daytime samples). Returns rows inserted.
 async fn put_sleep_night(db: &SqlitePool, user_id: i64, end_day: NaiveDate) -> anyhow::Result<u64> {
     let prev = end_day - Duration::days(1);
     // (stage, day, start_h, start_m, end_h, end_m) — overnight via end < start on `prev`.
     let segs: &[(&str, NaiveDate, u32, u32, u32, u32)] = &[
-        ("HKCategoryValueSleepAnalysisAwake", prev, 22, 0, 22, 18),
-        (
-            "HKCategoryValueSleepAnalysisAsleepCore",
-            prev,
-            22,
-            18,
-            23,
-            40,
-        ),
+        // First Core crosses midnight so the evening appears on this night date.
+        ("HKCategoryValueSleepAnalysisAsleepCore", prev, 22, 10, 1, 5),
         (
             "HKCategoryValueSleepAnalysisAsleepDeep",
-            prev,
-            23,
-            40,
+            end_day,
+            1,
+            5,
+            2,
             0,
-            50,
         ),
         (
             "HKCategoryValueSleepAnalysisAsleepCore",
             end_day,
-            0,
-            50,
             2,
+            0,
+            3,
             10,
         ),
         (
             "HKCategoryValueSleepAnalysisAsleepREM",
             end_day,
-            2,
+            3,
             10,
-            2,
+            3,
             55,
         ),
-        ("HKCategoryValueSleepAnalysisAwake", end_day, 2, 55, 3, 5),
+        ("HKCategoryValueSleepAnalysisAwake", end_day, 3, 55, 4, 5),
         (
             "HKCategoryValueSleepAnalysisAsleepCore",
             end_day,
-            3,
+            4,
             5,
-            4,
-            40,
-        ),
-        (
-            "HKCategoryValueSleepAnalysisAsleepDeep",
-            end_day,
-            4,
-            40,
             5,
             25,
         ),
         (
-            "HKCategoryValueSleepAnalysisAsleepREM",
+            "HKCategoryValueSleepAnalysisAsleepDeep",
             end_day,
             5,
             25,
             6,
-            35,
+            5,
         ),
-        ("HKCategoryValueSleepAnalysisAwake", end_day, 6, 35, 6, 50),
+        (
+            "HKCategoryValueSleepAnalysisAsleepREM",
+            end_day,
+            6,
+            5,
+            6,
+            55,
+        ),
+        ("HKCategoryValueSleepAnalysisAwake", end_day, 6, 55, 7, 10),
     ];
     for (stage, day, sh, sm, eh, em) in segs {
         put_reading(db, user_id, SLEEP, stage, "", *day, *sh, *sm, *eh, *em).await?;
@@ -472,12 +466,20 @@ mod tests {
             n.asleep_min.round(),
             (n.rem_min + n.core_min + n.deep_min + n.unspecified_min).round()
         );
+        assert!(!s.last_night.is_empty());
         for seg in &s.last_night {
-            if seg.end.starts_with("2024-06-07") {
-                let hour: u32 = seg.end[11..13].parse().unwrap();
-                assert!(hour < 12, "daytime end on night date: {seg:?}");
-            }
+            assert!(
+                seg.end.starts_with("2024-06-07"),
+                "segment must end on night date: {seg:?}"
+            );
+            let hour: u32 = seg.end[11..13].parse().unwrap();
+            assert!(hour < 12, "daytime end on night date: {seg:?}");
         }
+        let t0 = &s.last_night[0].start;
+        assert!(
+            t0.starts_with("2024-06-06 22:") || t0.starts_with("2024-06-06 23:"),
+            "chart should open in the evening: {t0}"
+        );
         let stages: std::collections::HashSet<_> =
             s.last_night.iter().map(|g| g.stage.as_str()).collect();
         for need in ["Awake", "AsleepREM", "AsleepCore", "AsleepDeep"] {
