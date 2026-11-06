@@ -1,0 +1,8 @@
+[package]
+name = "healthvibe-themes"
+description = "healthvibe theming (stub; see PR13/PR17)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

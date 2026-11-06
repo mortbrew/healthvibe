@@ -1,0 +1,96 @@
+# =============================================================================
+# healthvibe - Docker Compose file
+# -----------------------------------------------------------------------------
+# Lives in:   /opt/stacks/healthvibe/compose.yaml   (next to .env)
+# Build:      docker compose build        (builds the image locally from the
+#                                          source in this folder; no registry)
+# Start:      docker compose up -d
+# Logs:       docker compose logs -f healthvibe
+# Stop:       docker compose down
+#
+# Settings you are likely to change live in .env, not here.
+# =============================================================================
+
+services:
+  healthvibe:
+    # Build the image from the Dockerfile in this folder and tag it locally.
+    # Nothing is pulled from or pushed to a registry.
+    build: .
+    image: healthvibe:local
+    container_name: healthvibe
+    restart: unless-stopped
+
+    # Run as an ordinary user (uid/gid 1000), never root.
+    # ./appdata must be owned by 1000:1000 (see README / .env.example).
+    user: "1000:1000"
+
+    # All app settings (paths, cookies, log level) come from .env.
+    env_file: .env
+
+    # Everything healthvibe keeps lives in ./appdata on the host:
+    #   ./appdata/db       -> the SQLite database (healthvibe.db)
+    #   ./appdata/staging  -> uploads while they are being imported
+    #                         (deleted automatically after import)
+    volumes:
+      - ./appdata:/data
+
+    # --- Hardening ------------------------------------------------------------
+    # The container's own filesystem is read-only; the app can only write to
+    # ./appdata (above) and a small in-memory /tmp.
+    read_only: ${HEALTHVIBE_READ_ONLY_ROOTFS:-true}
+    tmpfs:
+      - /tmp
+    # Drop every Linux capability and forbid gaining new ones.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # --- Networking -----------------------------------------------------------
+    # No ports are published to the host. Your reverse proxy reaches the app at
+    #   http://healthvibe:8000
+    # over the shared Docker network named in .env (HEALTHVIBE_PROXY_NETWORK).
+    networks:
+      - proxy
+    # No reverse proxy yet? Remove the comment marks below to reach the app at
+    # http://127.0.0.1:8000 from the host itself only (not from the LAN).
+    # Also set HEALTHVIBE_ALLOW_HTTP=true in .env for that.
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+
+    # --- Health ---------------------------------------------------------------
+    # The image has no shell or curl, so the app checks itself.
+    healthcheck:
+      test: ["CMD", "/healthvibe", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Keep at most 3 log files of 10 MB each.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # --- Resource limits (OPTIONAL, off by default) -----------------------------
+    # Remove the comment marks to cap memory and CPU. The values are starting
+    # estimates, not measurements; measure real usage before tightening.
+    #  - One limit covers the app AND its SQLite database (same process).
+    #  - Do not go below 256M. If memory runs out Docker kills the container
+    #    mid-task (login password hashing, a backup, or an import). SQLite
+    #    recovers on restart, but that task fails and must be retried.
+    #  - The in-memory /tmp above counts against the memory limit.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M   # starting estimate; never below 256M
+    #       cpus: "1"      # starting estimate
+
+networks:
+  proxy:
+    # An existing Docker network your reverse proxy is also attached to.
+    # Created outside this file, e.g.:  docker network create proxy
+    external: true
+    name: ${HEALTHVIBE_PROXY_NETWORK:-proxy}

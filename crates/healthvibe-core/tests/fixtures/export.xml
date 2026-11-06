@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SYNTHETIC test fixture. Not real health data. -->
+<!DOCTYPE HealthData [
+<!ELEMENT HealthData (ExportDate,Me,(Record|Workout|ActivitySummary)*)>
+]>
+<HealthData locale="en_US">
+ <ExportDate value="2024-01-03 09:00:00 -0500"/>
+ <Me HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexNotSet"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Synthetic Phone" unit="count" creationDate="2024-01-02 07:10:00 -0500" startDate="2024-01-02 07:00:00 -0500" endDate="2024-01-02 07:10:00 -0500" value="420"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Synthetic Phone" unit="count" creationDate="2024-01-02 07:10:00 -0500" startDate="2024-01-02 07:00:00 -0500" endDate="2024-01-02 07:10:00 -0500" value="420"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Synthetic Watch" unit="count" startDate="2024-01-02 08:00:00 -0500" endDate="2024-01-02 08:05:00 -0500" value="300">
+  <MetadataEntry key="HKMetadataKeySyncVersion" value="1"/>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Synthetic Watch" unit="count/min" startDate="2024-01-02 08:01:00 -0500" endDate="2024-01-02 08:01:00 -0500" value="64"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Synthetic Watch" startDate="2024-01-01 23:00:00 -0500" endDate="2024-01-02 06:30:00 -0500" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+ <ActivitySummary dateComponents="2024-01-01" activeEnergyBurned="0" activeEnergyBurnedUnit="Cal" appleExerciseTime="0" appleStandHours="0"/>
+ <ActivitySummary dateComponents="2024-01-02" activeEnergyBurned="512.5" activeEnergyBurnedGoal="650" activeEnergyBurnedUnit="Cal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="32" appleExerciseTimeGoal="45" appleStandHours="9" appleStandHoursGoal="10"/>
+ <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" durationUnit="min" sourceName="Synthetic Watch" startDate="2024-01-02 17:00:00 -0500" endDate="2024-01-02 17:30:00 -0500"/>
+</HealthData>
