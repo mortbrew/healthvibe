@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 
 // Minimal history-API router; the server falls back to index.html.
-export function navigate(to: string) {
+export function navigate(to: string, opts?: { scroll?: boolean }) {
   if (to !== location.pathname) history.pushState(null, "", to);
   window.dispatchEvent(new PopStateEvent("popstate"));
-  window.scrollTo(0, 0);
+  if (opts?.scroll !== false) window.scrollTo(0, 0);
 }
 
 export function usePath() {

@@ -38,7 +38,7 @@ function One({ r, w, progress, color, arrow, dim, gid }: { r: number; w: number;
   );
 }
 
-export function FitRings({ v, size = 140, dim, label, replayKey = "" }: { v: RingVals | null; size?: number; dim?: boolean; label?: string; replayKey?: string }) {
+export function FitRings({ v, size = 140, dim, label, replayKey = "", settle = false }: { v: RingVals | null; size?: number; dim?: boolean; label?: string; replayKey?: string; settle?: boolean }) {
   const uid = useId().replace(/:/g, "");
   const w = size * 0.115, g = size * 0.012;
   const r1 = size / 2 - w / 2, r2 = r1 - w - g, r3 = r2 - w - g;
@@ -47,7 +47,7 @@ export function FitRings({ v, size = 140, dim, label, replayKey = "" }: { v: Rin
     ringFraction(v?.exercise[0] ?? 0, v?.exercise[1]),
     ringFraction(v?.stand[0] ?? 0, v?.stand[1]),
   ];
-  const shown = useRingMotion(targets, replayKey);
+  const shown = useRingMotion(targets, replayKey, settle);
   const rings = [
     { r: r1, progress: shown[0] ?? 0, color: "var(--move)", arrow: 0 },
     { r: r2, progress: shown[1] ?? 0, color: "var(--exercise)", arrow: 1 },

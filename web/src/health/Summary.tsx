@@ -1,13 +1,17 @@
 // Summary (Fitness-style), Activity day view + calendar, Steps & Distance details.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity } from "../api";
+import { Activity, api } from "../api";
 import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
 import { DISTANCE, ENERGY, STEPS, useApi, useBrowse } from "./meta";
 import { Board } from "./Board";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
+import { isFutureDay, mondayOf, replayGate, shiftDate } from "./day-nav";
 import { FitRings, GoalFrom, noGoals, ringsOf } from "./rings";
 import { NoGoalsAlert } from "./Goals";
+import { useBarMotion } from "./use-bar-motion";
+import { useDaySlide } from "./use-day-slide";
+import { usePrefersReducedMotion } from "./use-ring-motion";
 import { CalIcon, LargeTitle, NavBar, RoundBtn, XIcon } from "./ui";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
@@ -115,14 +119,60 @@ export function DistanceDetail() {
 
 /* ---------- Activity day view ---------- */
 
-function HourChart({ values, color, kind }: { values: number[]; color: string; kind: "bar" | "block" }) {
-  const W = 340, H = 110, max = Math.max(...values, 1e-9), bw = W / 24;
+const zeros = () => Array(24).fill(0) as number[];
+
+type DayPack = {
+  rings: Activity["rings"];
+  days: RingDay[];
+  move: number[];
+  exercise: number[];
+  stand: number[];
+};
+
+function useActivityPacks(dates: string[]) {
+  const [packs, setPacks] = useState<Record<string, DayPack>>({});
+  const key = dates.join("|");
+  useEffect(() => {
+    let dead = false;
+    for (const date of dates) {
+      if (packs[date]) continue;
+      const mon = mondayOf(date);
+      Promise.all([
+        api<Activity>(`/dashboard/activity?end=${date}`),
+        api<{ days: RingDay[] }>(`/rings?start=${mon}&end=${shiftDate(mon, 6)}`),
+        api<{ values: number[] }>(hourly(ENERGY, date)),
+        api<{ values: number[] }>(hourly(EXERCISE, date)),
+        api<{ values: number[] }>(hourly(STAND, date)),
+      ]).then(([act, week, mv, ex, st]) => {
+        if (dead) return;
+        const pack: DayPack = {
+          rings: act.rings?.date === date ? act.rings : null,
+          days: week.days ?? [],
+          move: mv.values?.length === 24 ? mv.values : zeros(),
+          exercise: ex.values?.length === 24 ? ex.values : zeros(),
+          stand: st.values?.length === 24 ? st.values : zeros(),
+        };
+        setPacks((s) => (s[date] ? s : { ...s, [date]: pack }));
+      }, () => {});
+    }
+    return () => { dead = true; };
+    // Missing packs are filled once per date. A newer date list drops late writes via `dead`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return packs;
+}
+
+function HourChart({ values, color, kind, replayKey, play, settle }: { values: number[]; color: string; kind: "bar" | "block"; replayKey: string; play: boolean; settle: boolean }) {
+  const W = 340, H = 110, bw = W / 24;
+  const shown = useBarMotion(values, replayKey, play, settle);
+  const draw = kind === "bar" ? shown : values;
+  const max = Math.max(...values, 1e-9);
   const peak = values.indexOf(Math.max(...values));
   return (
     <svg viewBox={`0 0 ${W} ${H + 16}`} className="hourchart" aria-hidden>
       <line x1="0" x2={W} y1={H} y2={H} stroke={color} strokeDasharray="1 4" strokeLinecap="round" strokeWidth="2" opacity=".6" />
-      {kind === "bar" && max > 1e-6 && <text x={Math.min(peak * bw, W - 30)} y="10" className="axis" style={{ fill: color }}>{n0(max)}</text>}
-      {values.map((v, i) =>
+      {kind === "bar" && max > 1e-6 && (draw[peak] ?? 0) > max * 0.08 && <text x={Math.min(peak * bw, W - 30)} y={Math.max(12, H - ((draw[peak] ?? 0) / max) * (H - 16) - 4)} className="axis" style={{ fill: color }}>{n0(max)}</text>}
+      {draw.map((v, i) =>
         kind === "block"
           ? <rect key={i} x={i * bw + 1.5} width={bw - 3} y={H - 26} height="22" rx="3" fill={color} opacity={v > 0 ? 1 : 0.18} />
           : v > 0 && <rect key={i} x={i * bw + bw * 0.22} width={bw * 0.56} y={H - (v / max) * (H - 16)} height={(v / max) * (H - 16)} rx="2" fill={color} />,
@@ -132,68 +182,123 @@ function HourChart({ values, color, kind }: { values: number[]; color: string; k
   );
 }
 
-const mondayOf = (d: string) => addDays(d, -((new Date(d + "T12:00:00").getDay() + 6) % 7));
-
-export function ActivityDay({ date }: { date: string }) {
-  const [cal, setCal] = useState(false);
-  const act = useApi<Activity>(`/dashboard/activity?end=${date}`);
-  const mon = mondayOf(date);
-  const week = useApi<{ days: RingDay[] }>(`/rings?start=${mon}&end=${addDays(mon, 6)}`);
-  const mv = useApi<{ values: number[] }>(hourly(ENERGY, date));
-  const ex = useApi<{ values: number[] }>(hourly(EXERCISE, date));
-  const st = useApi<{ values: number[] }>(hourly(STAND, date));
-  const r = act.data?.rings?.date === date ? act.data.rings : null;
-  const title = `${date === today() ? "Today, " : ""}${new Date(date + "T12:00:00").toLocaleDateString([], { weekday: date === today() ? undefined : "short", month: "short", day: "numeric", year: "numeric" })}`;
-  const showAlert = date === today() && noGoals(r);
+function DayChev({ dir }: { dir: -1 | 1 }) {
   return (
-    <div className="page activityday">
-      <NavBar to="/" title={title} right={<RoundBtn label="Calendar" onClick={() => setCal(true)}><CalIcon /></RoundBtn>} />
-      <NoGoalsAlert show={showAlert} />
-      <div className="weekstrip">
-        {Array.from({ length: 7 }, (_, i) => {
-          const d = addDays(mon, i);
-          const rd = week.data?.days.find((x) => x.date === d);
-          const future = d > today();
-          return (
-            <Link key={d} to={`/activity/${d}`} className={d === date ? "wd on" : "wd"}>
-              <span className={d === today() ? "wl today" : "wl"}>{"MTWTFSS"[i]}</span>
-              <FitRings v={rd && !future ? ringsOf(rd) : null} size={34} dim={future} replayKey={d} />
-            </Link>
-          );
-        })}
-      </div>
-      <div className="center bigrings"><FitRings v={r ? ringsOf(r) : null} size={250} replayKey={date} /></div>
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden focusable="false">
+      <path d={dir < 0 ? "M14.5 6.5 9 12l5.5 5.5" : "M9.5 6.5 15 12l-5.5 5.5"} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function goDay(date: string) {
+  navigate(`/activity/${date}`, { scroll: false });
+}
+
+function WeekStrip({ date, pack }: { date: string; pack?: DayPack }) {
+  const mon = mondayOf(date);
+  return (
+    <div className="weekstrip" role="group" aria-label="Days this week">
+      {Array.from({ length: 7 }, (_, i) => {
+        const d = shiftDate(mon, i);
+        const rd = pack?.days.find((x) => x.date === d);
+        const later = isFutureDay(d, today());
+        return (
+          <a key={d} href={`/activity/${d}`} className={d === date ? "wd on" : "wd"} aria-current={d === date ? "date" : undefined} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); goDay(d); }}>
+            <span className={d === today() ? "wl today" : "wl"}>{"MTWTFSS"[i]}</span>
+            <FitRings v={rd && !later ? ringsOf(rd) : null} size={34} dim={later} replayKey={d} settle />
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayFace({ date, pack, play, settle }: { date: string; pack?: DayPack; play: boolean; settle: boolean }) {
+  const future = isFutureDay(date, today());
+  const r = pack?.rings ?? null;
+  const showRings = !future && r ? ringsOf(r) : null;
+  return (
+    <>
+      <div className="center bigrings"><FitRings v={play || settle ? showRings : null} size={250} replayKey={date} settle={settle || !play} /></div>
       {r && <GoalFrom r={r} className="center" />}
       {(r || date === today()) && <p className="muted small center"><Link to="/account/goals">{noGoals(r) ? "Set goals" : "Edit goals"}</Link></p>}
       <div className="act-charts">
-      <section className="actsec">
-        <div className="as-head">
-          <p className="as-label" style={{ color: "var(--move)" }}>Move</p>
-          <p className="as-of muted">{r ? `${n0(r.move_kcal)} of ${r.move_goal != null ? n0(r.move_goal) : "—"} cal` : "--"}</p>
-        </div>
-        <HourChart values={mv.data?.values ?? Array(24).fill(0)} color="var(--move)" kind="bar" />
-      </section>
-      <section className="actsec">
-        <div className="as-head">
-          <p className="as-label" style={{ color: "var(--exercise)" }}>Exercise</p>
-          <p className="as-of muted">{r ? `${n0(r.exercise_min)} of ${r.exercise_goal != null ? n0(r.exercise_goal) : "—"} min` : "--"}</p>
-        </div>
-        <HourChart values={ex.data?.values ?? Array(24).fill(0)} color="var(--exercise)" kind="bar" />
-      </section>
-      <section className="actsec">
-        <div className="as-head">
-          <p className="as-label" style={{ color: "var(--stand)" }}>Stand</p>
-          <p className="as-of muted">{r ? `${n0(r.stand_hours)} of ${r.stand_goal != null ? n0(r.stand_goal) : "—"} hr` : "--"}</p>
-        </div>
-        <HourChart values={st.data?.values ?? Array(24).fill(0)} color="var(--stand)" kind="block" />
-      </section>
+        <section className="actsec">
+          <div className="as-head">
+            <p className="as-label" style={{ color: "var(--move)" }}>Move</p>
+            <p className="as-of muted">{r ? `${n0(r.move_kcal)} of ${r.move_goal != null ? n0(r.move_goal) : "—"} cal` : "--"}</p>
+          </div>
+          <HourChart values={pack?.move ?? zeros()} color="var(--move)" kind="bar" replayKey={date} play={play} settle={settle} />
+        </section>
+        <section className="actsec">
+          <div className="as-head">
+            <p className="as-label" style={{ color: "var(--exercise)" }}>Exercise</p>
+            <p className="as-of muted">{r ? `${n0(r.exercise_min)} of ${r.exercise_goal != null ? n0(r.exercise_goal) : "—"} min` : "--"}</p>
+          </div>
+          <HourChart values={pack?.exercise ?? zeros()} color="var(--exercise)" kind="bar" replayKey={date} play={play} settle={settle} />
+        </section>
+        <section className="actsec">
+          <div className="as-head">
+            <p className="as-label" style={{ color: "var(--stand)" }}>Stand</p>
+            <p className="as-of muted">{r ? `${n0(r.stand_hours)} of ${r.stand_goal != null ? n0(r.stand_goal) : "—"} hr` : "--"}</p>
+          </div>
+          <HourChart values={pack?.stand ?? zeros()} color="var(--stand)" kind="block" replayKey={date} play={false} settle />
+        </section>
       </div>
       {r && (
         <div className="tiles">
           <div className="tile"><b>Steps</b><p className="big num">{n0(r.steps)}</p></div>
-          <div className="tile"><b>Workout</b><p className="big num">{week.data?.days.find((x) => x.date === date)?.workout ? "Yes" : "—"}</p></div>
+          <div className="tile"><b>Workout</b><p className="big num">{pack?.days.find((x) => x.date === date)?.workout ? "Yes" : "—"}</p></div>
         </div>
       )}
+    </>
+  );
+}
+
+export function ActivityDay({ date }: { date: string }) {
+  const [cal, setCal] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const slide = useDaySlide(date, reduced);
+  const packs = useActivityPacks(slide.phase === "run" ? [slide.from, slide.to] : [slide.to]);
+  const [go, setGo] = useState(false);
+  useEffect(() => {
+    if (slide.phase !== "run") { setGo(false); return; }
+    setGo(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setGo(true)); });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [slide.phase, slide.from, slide.to]);
+  const titleDate = slide.phase === "run" ? slide.to : date;
+  const title = `${titleDate === today() ? "Today, " : ""}${new Date(titleDate + "T12:00:00").toLocaleDateString([], { weekday: titleDate === today() ? undefined : "short", month: "short", day: "numeric", year: "numeric" })}`;
+  const headRings = packs[titleDate]?.rings ?? null;
+  const showAlert = titleDate === today() && noGoals(headRings);
+  const order = slide.dir === -1 ? [slide.to, slide.from] : [slide.from, slide.to];
+  const shift = slide.dir === -1 ? (go ? "translateX(0)" : "translateX(-50%)") : (go ? "translateX(-50%)" : "translateX(0)");
+  const sliding = slide.phase === "run" && slide.dir !== 0;
+  const gate = replayGate(sliding ? "run" : "idle", reduced);
+  const track = (part: "strip" | "body") => sliding ? (
+    <div className={go && !reduced ? "day-track on" : "day-track"} style={{ transform: shift }}>
+      {order.map((d) => (
+        <div className="day-pane" key={`${part}:${slide.from}->${slide.to}:${d}`} aria-hidden={d !== slide.to}>
+          {part === "strip"
+            ? <WeekStrip date={d} pack={packs[d]} />
+            : <DayFace date={d} pack={packs[d]} play={false} settle={d === slide.from} />}
+        </div>
+      ))}
+    </div>
+  ) : part === "strip"
+    ? <WeekStrip date={date} pack={packs[date]} />
+    : <DayFace date={date} pack={packs[date]} play={gate === "play"} settle={gate !== "play"} />;
+  return (
+    <div className="page activityday">
+      <NavBar to="/" title={title} right={<RoundBtn label="Calendar" onClick={() => setCal(true)}><CalIcon /></RoundBtn>} />
+      <NoGoalsAlert show={showAlert} />
+      <div className="daynav">
+        <button type="button" className="daybtn" aria-label="Previous day" onClick={() => goDay(shiftDate(date, -1))}><DayChev dir={-1} /></button>
+        <div className="day-clip" aria-live="polite">{track("strip")}</div>
+        <button type="button" className="daybtn" aria-label="Next day" onClick={() => goDay(shiftDate(date, 1))}><DayChev dir={1} /></button>
+      </div>
+      <div className="day-clip">{track("body")}</div>
       {cal && <ActivityCalendar date={date} onClose={() => setCal(false)} />}
     </div>
   );

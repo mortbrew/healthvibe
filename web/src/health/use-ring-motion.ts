@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RING_DRAW_MS, easeOutRing, ringMotion } from "./ring-motion";
 
-function usePrefersReducedMotion(): boolean {
+export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -24,20 +24,20 @@ function finite(n: number): number {
  * or the target fractions change (a new day, or values arriving). Identical
  * rerenders keep the finished pose. Reduced motion shows the end state
  * immediately, including if the preference flips while the draw is running.
+ * `settle` also snaps to the end (the day sliding off screen) without a draw.
  */
-export function useRingMotion(targets: readonly number[], replayKey = ""): number[] {
+export function useRingMotion(targets: readonly number[], replayKey = "", settle = false): number[] {
   const reduced = usePrefersReducedMotion();
   const goal = targets.map(finite);
   const sig = `${replayKey}\0${goal.map((n) => n.toFixed(4)).join(",")}`;
-  const [shown, setShown] = useState<number[]>(() =>
-    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      ? goal
-      : goal.map(() => 0),
-  );
+  const snap0 =
+    settle ||
+    (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const [shown, setShown] = useState<number[]>(() => (snap0 ? goal : goal.map(() => 0)));
   const played = useRef<string | null>(null);
 
   useEffect(() => {
-    const mode = ringMotion(played.current, sig, reduced);
+    const mode = settle ? "snap" : ringMotion(played.current, sig, reduced);
     if (mode === "keep") return;
     if (mode === "snap" || goal.every((n) => n === 0)) {
       played.current = sig;
@@ -63,7 +63,7 @@ export function useRingMotion(targets: readonly number[], replayKey = ""): numbe
     };
     // goal is encoded in sig
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, reduced]);
+  }, [sig, reduced, settle]);
 
   return shown;
 }
