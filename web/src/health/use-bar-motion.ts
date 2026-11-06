@@ -6,8 +6,8 @@ import { usePrefersReducedMotion, useVisibleElement } from "./use-ring-motion";
 /**
  * Grow Move/Exercise bars from 0 to the imported hourly values.
  * `play` is false while the day is still sliding. `settle` paints the final
- * heights immediately (the day sliding away). Reduced motion snaps, including
- * when the preference changes mid-draw. The same signature does not replay.
+ * heights immediately (the day sliding away). Reduced motion snaps to the
+ * end and stays there if motion is turned back on. The same signature does not replay.
  */
 export function useBarMotion(values: readonly number[], replayKey: string, play: boolean, settle: boolean): { shown: number[]; ref: (el: Element | null) => void } {
   const reduced = usePrefersReducedMotion();
@@ -27,7 +27,7 @@ export function useBarMotion(values: readonly number[], replayKey: string, play:
       return;
     }
     if (mode === "snap" || safe.every((v) => v === 0)) {
-      played.current = safe.every((v) => v === 0) && !reduced ? sig : null;
+      played.current = sig;
       setShown(safe.slice());
       return;
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { drawMode, drawProgress } from "./draw-clock";
+import { boxInView, drawMode, drawProgress } from "./draw-clock";
 import { RING_DRAW_MS, easeOutRing } from "./ring-motion";
 
 export function usePrefersReducedMotion(): boolean {
@@ -20,41 +20,39 @@ function finite(n: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** True once `el` is on screen and the document is visible. Hidden time does not count. */
+function elementInView(el: Element): boolean {
+  if (document.visibilityState === "hidden") return false;
+  const r = el.getBoundingClientRect();
+  return boxInView(r, {
+    width: window.innerWidth || document.documentElement.clientWidth,
+    height: window.innerHeight || document.documentElement.clientHeight,
+  });
+}
+
+/** True only while a real slice of `el` is inside the viewport. */
 export function useVisibleElement() {
   const [node, setNode] = useState<Element | null>(null);
   const [visible, setVisible] = useState(false);
-  const hit = useRef(false);
   const ref = useCallback((el: Element | null) => setNode(el), []);
   useEffect(() => {
     if (!node) {
-      hit.current = false;
       setVisible(false);
       return;
     }
-    const publish = () => setVisible(hit.current && document.visibilityState === "visible");
+    const publish = () => setVisible(elementInView(node));
     let io: IntersectionObserver | undefined;
-    if (typeof IntersectionObserver === "undefined") hit.current = true;
-    else {
-      io = new IntersectionObserver((entries) => {
-        hit.current = entries.some((e) => e.isIntersecting);
-        publish();
-      }, { threshold: [0, 0.05] });
+    if (typeof IntersectionObserver !== "undefined") {
+      io = new IntersectionObserver(() => publish(), { threshold: [0, 0.25, 0.5, 1] });
       io.observe(node);
     }
     publish();
+    document.addEventListener("scroll", publish, true);
+    window.addEventListener("resize", publish);
     document.addEventListener("visibilitychange", publish);
-    // Some WebKit builds never deliver IntersectionObserver for an SVG.
-    // If the document is showing, start the draw anyway so it cannot stay blank.
-    const fallback = window.setTimeout(() => {
-      if (document.visibilityState === "visible") {
-        hit.current = true;
-        publish();
-      }
-    }, 350);
     return () => {
-      window.clearTimeout(fallback);
       io?.disconnect();
+      document.removeEventListener("scroll", publish, true);
+      window.removeEventListener("resize", publish);
       document.removeEventListener("visibilitychange", publish);
     };
   }, [node]);
@@ -65,9 +63,9 @@ export function useVisibleElement() {
  * Drive all rings in one set from the same clock. The draw starts on the first
  * frame the SVG is actually on screen, so a deferred mobile callback cannot
  * finish the ring before it is visible. Replays when `replayKey` or the
- * fractions change. The same signature does not replay. Reduced motion snaps,
- * including a live change, and does not count as a finished play. `settle`
- * snaps the day that is sliding away.
+ * fractions change. The same signature does not replay. Reduced motion snaps
+ * to the end and stays there if motion is turned back on. `settle` snaps the
+ * day that is sliding away.
  */
 export function useRingMotion(targets: readonly number[], replayKey = "", settle = false): { shown: number[]; ref: (el: Element | null) => void } {
   const reduced = usePrefersReducedMotion();
@@ -86,8 +84,7 @@ export function useRingMotion(targets: readonly number[], replayKey = "", settle
       return;
     }
     if (mode === "snap" || goal.every((n) => n === 0)) {
-      // A snap is not a finished draw. Turning motion back on must still play.
-      played.current = goal.every((n) => n === 0) && !reduced ? sig : null;
+      played.current = sig;
       setShown(goal);
       return;
     }
