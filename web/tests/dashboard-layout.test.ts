@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mobileDestinations, moveItem } from "../src/health/nav-layout.ts";
-import { capsuleRadius, stageBarWidth, weekSegmentHeight } from "../src/health/sleep-geometry.ts";
+import { capsuleRadius, connectorWidth, hypnogramFrame, stageBandHeight, stageBarWidth, weekSegmentHeight } from "../src/health/sleep-geometry.ts";
 
 test("moveItem reorders and ignores a no-op", () => {
   assert.deepEqual(moveItem(["a", "b", "c"], 0, 2), ["b", "c", "a"]);
@@ -33,12 +33,22 @@ test("phone bar keeps the first destinations and parks the rest in More", () => 
   );
 });
 
-test("sleep bars stay thin capsules instead of forced circles", () => {
-  assert.equal(stageBarWidth(40, false), 40);
-  assert.equal(stageBarWidth(1, true), 3.5);
-  assert.equal(stageBarWidth(2, false), 5);
-  assert.equal(capsuleRadius(3.5, 14), 1.75);
-  assert.equal(capsuleRadius(40, 18), 9);
+test("sleep bands fill the lane and connectors stay translucent-width", () => {
+  const detail = hypnogramFrame("detail");
+  const compact = hypnogramFrame("compact");
+  const row = (detail.H - detail.pad.t - detail.pad.b) / 4;
+  const band = stageBandHeight(row, detail.bandFrac);
+  assert.ok(band > row * 0.55, `detail band ${band} should fill lane ${row}`);
+  assert.ok(band < row, "bands must not overlap the next lane");
+  const compactRow = (compact.H - compact.pad.t - compact.pad.b) / 4;
+  const compactBand = stageBandHeight(compactRow, compact.bandFrac);
+  assert.ok(compactBand > compactRow * 0.6);
+  assert.equal(stageBarWidth(80, band), 80);
+  assert.ok(stageBarWidth(2, band) >= band * 0.4);
+  assert.ok(connectorWidth(band) >= 4);
+  assert.equal(capsuleRadius(band, band), band / 2);
+  assert.equal(detail.showLabels, true);
+  assert.equal(compact.showLabels, false);
   assert.ok(weekSegmentHeight(2) >= 3);
   assert.ok(weekSegmentHeight(30) < 30);
 });

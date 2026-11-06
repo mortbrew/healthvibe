@@ -2,6 +2,7 @@
 import { createContext, useContext } from "react";
 import { User } from "../api";
 import { AvatarCfg } from "./avatar";
+import { displayWeight } from "./weight-display";
 
 export type Units = { distance: "mi" | "km"; weight: "lb" | "kg"; energy: "cal" | "kj"; temp: "f" | "c" };
 export type Profile = {
@@ -22,10 +23,10 @@ export const unitsOf = (p: Profile): Units => ({ distance: "mi", weight: "lb", e
 /** Convert a stored value to the user's preferred unit; returns [value, label]. */
 export function conv(v: number, unit: string | null, u: Units): [number, string] {
   const x = (unit ?? "").toLowerCase();
+  const weightish = /^(kg|kilograms?|lbs?|pounds?)$/.test(x.replace(/\s+/g, ""));
+  if (weightish) return displayWeight(v, unit, u.weight);
   if (x === "km" && u.distance === "mi") return [v / 1.609344, "MI"];
   if (x === "mi" && u.distance === "km") return [v * 1.609344, "KM"];
-  if ((x === "kg") && u.weight === "lb") return [v * 2.20462, "LB"];
-  if (x === "lb" && u.weight === "kg") return [v / 2.20462, "KG"];
   if ((x === "kcal" || x === "cal") && u.energy === "kj") return [v * 4.184, "KJ"];
   if (x === "kj" && u.energy === "cal") return [v / 4.184, "CAL"];
   if (x === "degc" && u.temp === "f") return [v * 9 / 5 + 32, "°F"];

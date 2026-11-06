@@ -164,12 +164,13 @@ function useActivityPacks(dates: string[]) {
 
 function HourChart({ values, color, kind, replayKey, play, settle }: { values: number[]; color: string; kind: "bar" | "block"; replayKey: string; play: boolean; settle: boolean }) {
   const W = 340, H = 110, bw = W / 24;
-  const shown = useBarMotion(values, replayKey, play, settle);
+  const motion = useBarMotion(values, replayKey, play, settle);
+  const shown = motion.shown;
   const draw = kind === "bar" ? shown : values;
   const max = Math.max(...values, 1e-9);
   const peak = values.indexOf(Math.max(...values));
   return (
-    <svg viewBox={`0 0 ${W} ${H + 16}`} className="hourchart" aria-hidden>
+    <svg ref={motion.ref} viewBox={`0 0 ${W} ${H + 16}`} className="hourchart" aria-hidden>
       <line x1="0" x2={W} y1={H} y2={H} stroke={color} strokeDasharray="1 4" strokeLinecap="round" strokeWidth="2" opacity=".6" />
       {kind === "bar" && max > 1e-6 && (draw[peak] ?? 0) > max * 0.08 && <text x={Math.min(peak * bw, W - 30)} y={Math.max(12, H - ((draw[peak] ?? 0) / max) * (H - 16) - 4)} className="axis" style={{ fill: color }}>{n0(max)}</text>}
       {draw.map((v, i) =>

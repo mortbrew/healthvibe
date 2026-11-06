@@ -47,14 +47,15 @@ export function FitRings({ v, size = 140, dim, label, replayKey = "", settle = f
     ringFraction(v?.exercise[0] ?? 0, v?.exercise[1]),
     ringFraction(v?.stand[0] ?? 0, v?.stand[1]),
   ];
-  const shown = useRingMotion(targets, replayKey, settle);
+  const motion = useRingMotion(targets, replayKey, settle);
+  const shown = motion.shown;
   const rings = [
     { r: r1, progress: shown[0] ?? 0, color: "var(--move)", arrow: 0 },
     { r: r2, progress: shown[1] ?? 0, color: "var(--exercise)", arrow: 1 },
     { r: r3, progress: shown[2] ?? 0, color: "var(--stand)", arrow: 2 },
   ];
   return (
-    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label={label ?? "Activity rings"} className="fitrings" data-ring-progress={shown.map((n) => n.toFixed(3)).join(",")}>
+    <svg ref={motion.ref} width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label={label ?? "Activity rings"} className="fitrings" data-ring-progress={shown.map((n) => n.toFixed(3)).join(",")}>
       <defs>
         {rings.map((ring, i) => (
           <linearGradient key={i} id={`${uid}-g${i}`} gradientUnits="userSpaceOnUse" x1={-ring.r} y1={-ring.r} x2={ring.r} y2={ring.r}>

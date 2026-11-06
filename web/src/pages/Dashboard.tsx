@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Activity, api, Body, Dashboard as Dash, explain, Heart, Metric, SeriesData, Sleep, Widget } from "../api";
-import { Bars, Hypnogram, Lines, sleepLegendRows } from "../components/charts";
+import { Bars, Hypnogram, Lines } from "../components/charts";
 import { Link } from "../router";
+import { useHealth } from "../health/ctx";
+import { displayWeight, displayWeights } from "../health/weight-display";
 import { FitRings, GoalFrom, ofGoal, ringsOf } from "../health/rings";
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
@@ -412,23 +414,13 @@ function SleepCard({ s }: { s: Sleep }) {
   const asleep = (n: Sleep["nights"][number]) => n.asleep_min;
   return (
     <section className="card sleep">
-      <div className="cardhead">
-        <h2>Sleep</h2>
-        {last && <span className="big" style={{ color: "var(--core)" }}>{hm(asleep(last))}</span>}
-      </div>
+      <h2>Sleep</h2>
       {!last ? (
         <Empty what="sleep" />
       ) : (
         <>
-          <Hypnogram segments={s.last_night} />
-          <div className="legend">
-            {sleepLegendRows(last).map((st) => (
-              <span key={st.key}>
-                <i style={{ background: st.color }} />
-                {st.label} {hm(st.minutes)}
-              </span>
-            ))}
-          </div>
+          <Hypnogram variant="compact" segments={s.last_night} />
+          <p className="sleep-total" style={{ color: "var(--core)" }}>{hm(asleep(last))}</p>
           <p className="muted foot">Samples ending {last.date} from {last.source || "unknown source"}</p>
         </>
       )}
@@ -437,10 +429,14 @@ function SleepCard({ s }: { s: Sleep }) {
 }
 
 function BodyCard({ b }: { b: Body }) {
-  const w = b.weight.points;
+  const { units } = useHealth();
+  const stored = b.weight.points;
+  const prefer = units.weight;
+  const shown = displayWeights(stored, b.weight.unit, prefer);
   const fat = b.body_fat.points;
-  const latest = w[w.length - 1];
-  const delta = w.length > 1 ? latest.value - w[0].value : 0;
+  const latest = shown[shown.length - 1];
+  const unit = stored.length ? displayWeight(stored[0].value, b.weight.unit, prefer)[1] : "";
+  const delta = shown.length > 1 ? latest.value - shown[0].value : 0;
   // Apple stores body fat as a fraction (0.21); show percent.
   const pct = (v: number) => (b.body_fat.unit === "%" && v <= 1 ? v * 100 : v);
   return (
@@ -449,19 +445,19 @@ function BodyCard({ b }: { b: Body }) {
         <h2>Body</h2>
         {latest && (
           <span className="big">
-            {latest.value.toFixed(1)}<small> {b.weight.unit ?? ""}</small>
+            {latest.value.toFixed(1)}<small> {unit}</small>
             {fat.length > 0 && <small> · {pct(fat[fat.length - 1].value).toFixed(1)}% fat</small>}
           </span>
         )}
       </div>
-      {w.length === 0 && fat.length === 0 ? (
+      {stored.length === 0 && fat.length === 0 ? (
         <Empty what="body measurement" />
       ) : (
         <>
-          <Lines series={[{ data: w, color: "var(--chart-2)", label: "Weight" }]} decimals={1} height={120} />
-          {w.length > 1 && (
+          <Lines series={[{ data: shown, color: "var(--chart-2)", label: "Weight" }]} decimals={1} height={120} unit={unit} />
+          {shown.length > 1 && (
             <p className="muted foot">
-              {delta >= 0 ? "+" : ""}{delta.toFixed(1)} {b.weight.unit} over {w.length} weigh-ins
+              {delta >= 0 ? "+" : ""}{delta.toFixed(1)} {unit} over {stored.length} weigh-ins
             </p>
           )}
         </>

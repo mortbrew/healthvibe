@@ -4,7 +4,7 @@
 import { useId } from "react";
 import { DayValue } from "../api";
 import { ringFraction, ringLaps } from "../health/ring-motion";
-import { capsuleRadius, stageBarWidth, weekSegmentHeight } from "../health/sleep-geometry";
+import { CONNECTOR_OPACITY, capsuleRadius, connectorWidth, hypnogramFrame, stageBandHeight, stageBarWidth, weekSegmentHeight, type HypnogramVariant } from "../health/sleep-geometry";
 import { useRingMotion } from "../health/use-ring-motion";
 
 /** One ring stroke. `progress` may exceed 1; the extra lap is the overlap, not a 100% cap. */
@@ -47,13 +47,14 @@ export function Rings(props: { move: [number, number | null]; exercise: [number,
   const w = size * 0.11;
   const gap = w * 1.12;
   const r0 = size / 2 - w / 2 - 2;
-  const shown = useRingMotion([
+  const motion = useRingMotion([
     ringFraction(props.move[0], props.move[1]),
     ringFraction(props.exercise[0], props.exercise[1]),
     ringFraction(props.stand[0], props.stand[1]),
   ], props.replayKey ?? "");
+  const shown = motion.shown;
   return (
-    <svg width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label="Activity rings" data-ring-progress={shown.map((n) => n.toFixed(3)).join(",")}>
+    <svg ref={motion.ref} width={size} height={size} viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} role="img" aria-label="Activity rings" data-ring-progress={shown.map((n) => n.toFixed(3)).join(",")}>
       <Ring progress={shown[0] ?? 0} color="var(--move)" r={r0} width={w} />
       <Ring progress={shown[1] ?? 0} color="var(--exercise)" r={r0 - gap} width={w} />
       <Ring progress={shown[2] ?? 0} color="var(--stand)" r={r0 - 2 * gap} width={w} />
@@ -107,6 +108,7 @@ export function Lines(props: {
   bandColor?: string;
   height?: number;
   decimals?: number;
+  unit?: string;
 }) {
   const H = props.height ?? 160;
   const pad = { l: 34, r: 10, t: 10, b: 22 };
@@ -151,9 +153,11 @@ export function Lines(props: {
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-          {s.data.length > 0 && (
-            <circle cx={x(s.data[s.data.length - 1].date)} cy={y(s.data[s.data.length - 1].value)} r={4} fill={s.color} />
-          )}
+          {s.data.map((d, i) => (
+            <circle key={d.date} cx={x(d.date)} cy={y(d.value)} r={i === s.data.length - 1 ? 4 : 7} fill={i === s.data.length - 1 ? s.color : "transparent"}>
+              <title>{`${d.date}: ${fmt(d.value)}${props.unit ? " " + props.unit : ""}`}</title>
+            </circle>
+          ))}
         </g>
       ))}
       {dates.map((d, i) =>
@@ -218,16 +222,15 @@ export function asleepFromLegend(n: NightMins): number {
 }
 
 /**
- * Apple Health day / More Stages chart: rounded stage bars centered on
- * horizontal grid lines, with a thin connector at each stage change.
+ * Day / More Stages chart, also the compact Summary card.
+ * Bands share one lane height. Connectors are wide and translucent.
  * Unstaged "asleep" (older watches) is drawn on the Core row.
+ * Each block is one imported sample. Nothing is grouped into a session.
  */
-export function Hypnogram(props: { segments: { stage: string; start: string; end: string }[] }) {
+export function Hypnogram(props: { segments: { stage: string; start: string; end: string }[]; variant?: HypnogramVariant }) {
   const uid = useId().replace(/:/g, "");
-  // Phone-like aspect. A 640-wide viewBox made the lanes short and the bars fat.
-  const plotW = 360;
-  const H = 268;
-  const pad = { l: 52, r: 8, t: 12, b: 26 };
+  const frame = hypnogramFrame(props.variant ?? "detail");
+  const { plotW, H, pad } = frame;
   const segs = props.segments
     .filter((s) => STAGES.some((st) => st.key === s.stage) || s.stage === "AsleepUnspecified")
     .slice()
@@ -251,7 +254,8 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
   const axis1 = Math.max(t1, ticks[ticks.length - 1] ?? t1);
   const x = (v: number) => pad.l + ((plotW - pad.l - pad.r) * (v - axis0)) / Math.max(axis1 - axis0, 1);
   const rowH = (H - pad.t - pad.b) / STAGES.length;
-  const barH = (stage: string) => (stage === "Awake" ? 14 : 18);
+  const bandH = stageBandHeight(rowH, frame.bandFrac);
+  const linkW = connectorWidth(bandH);
   const row = (stage: string) => {
     const i = STAGES.findIndex((s) => s.key === stage);
     return i < 0 ? 2 : i;
@@ -266,10 +270,9 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
   const bars = segs.map((s) => {
     const x1 = x(parseLocal(s.start));
     const x2 = x(parseLocal(s.end));
-    const h = barH(s.stage);
-    const w = stageBarWidth(x2 - x1, s.stage === "Awake");
+    const w = stageBarWidth(x2 - x1, bandH);
     const mid = (x1 + x2) / 2;
-    return { stage: s.stage, left: mid - w / 2, right: mid + w / 2, y: yC(s.stage), h, w };
+    return { stage: s.stage, left: mid - w / 2, right: mid + w / 2, y: yC(s.stage), h: bandH, w };
   });
   const links = bars.slice(1).flatMap((b, i) => {
     const prev = bars[i];
@@ -302,13 +305,13 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
         const y = pad.t + rowH * i + rowH / 2;
         return (
           <g key={s.key}>
-            <line x1={pad.l} x2={plotW - pad.r} y1={y} y2={y} stroke="var(--border)" strokeOpacity="0.55" />
-            <text x={0} y={y + 3} className="axis">{s.label}</text>
+            <line x1={pad.l} x2={plotW - pad.r} y1={y} y2={y} stroke="var(--border)" strokeOpacity={frame.showLabels ? 0.45 : 0.2} />
+            {frame.showLabels && <text x={0} y={y + 3} className="axis">{s.label}</text>}
           </g>
         );
       })}
       {links.map((l) => (
-        <line key={l.id} x1={l.xj} y1={l.top} x2={l.xj} y2={l.bot} stroke={`url(#${l.id})`} strokeWidth={1.6} />
+        <line key={l.id} x1={l.xj} y1={l.top} x2={l.xj} y2={l.bot} stroke={`url(#${l.id})`} strokeWidth={linkW} strokeOpacity={CONNECTOR_OPACITY} />
       ))}
       {bars.map((b, i) => (
         <rect
@@ -322,7 +325,7 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
           fill={colorOf(b.stage)}
         />
       ))}
-      {ticks.map((h) => (
+      {frame.showAxis && ticks.map((h) => (
         <text key={h} x={Math.min(plotW - pad.r, Math.max(pad.l, x(h)))} y={H - 6} textAnchor="middle" className="axis">
           {fmtTick(h)}
         </text>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { BAR_DRAW_MS, barMotion, easeOutBar } from "./bar-motion";
-import { usePrefersReducedMotion } from "./use-ring-motion";
+import { BAR_DRAW_MS, easeOutBar } from "./bar-motion";
+import { drawMode, drawProgress } from "./draw-clock";
+import { usePrefersReducedMotion, useVisibleElement } from "./use-ring-motion";
 
 /**
  * Grow Move/Exercise bars from 0 to the imported hourly values.
@@ -8,36 +9,47 @@ import { usePrefersReducedMotion } from "./use-ring-motion";
  * heights immediately (the day sliding away). Reduced motion snaps, including
  * when the preference changes mid-draw. The same signature does not replay.
  */
-export function useBarMotion(values: readonly number[], replayKey: string, play: boolean, settle: boolean): number[] {
+export function useBarMotion(values: readonly number[], replayKey: string, play: boolean, settle: boolean): { shown: number[]; ref: (el: Element | null) => void } {
   const reduced = usePrefersReducedMotion();
+  const { ref, visible } = useVisibleElement();
   const sig = `${replayKey}\0${values.map((v) => (Number.isFinite(v) ? v.toFixed(3) : "0")).join(",")}`;
   const safe = values.map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
   const [shown, setShown] = useState<number[]>(() => (settle || reduced ? safe : safe.map(() => 0)));
   const played = useRef<string | null>(null);
 
   useEffect(() => {
-    const mode = barMotion(played.current, sig, reduced, play, settle);
+    const mode = !play && !settle && !reduced
+      ? "wait"
+      : drawMode({ played: played.current, sig, reduced, visible: play ? visible : false, settle });
     if (mode === "keep") return;
-    if (mode === "baseline") {
+    if (mode === "wait") {
       setShown(safe.map(() => 0));
       return;
     }
     if (mode === "snap" || safe.every((v) => v === 0)) {
-      played.current = sig;
+      played.current = safe.every((v) => v === 0) && !reduced ? sig : null;
       setShown(safe.slice());
       return;
     }
-    played.current = sig;
     let raf = 0;
+    let origin: number | null = null;
     let finished = false;
-    const t0 = performance.now();
     setShown(safe.map(() => 0));
     const tick = (now: number) => {
-      const t = Math.min(1, (now - t0) / BAR_DRAW_MS);
-      const e = easeOutBar(t);
+      if (document.visibilityState === "hidden") {
+        origin = null;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const step = drawProgress(origin, now, BAR_DRAW_MS);
+      origin = step.origin;
+      const e = easeOutBar(step.t);
       setShown(safe.map((v) => v * e));
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else finished = true;
+      if (step.t < 1) raf = requestAnimationFrame(tick);
+      else {
+        finished = true;
+        played.current = sig;
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => {
@@ -46,7 +58,7 @@ export function useBarMotion(values: readonly number[], replayKey: string, play:
     };
     // safe is encoded in sig
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, reduced, play, settle]);
+  }, [sig, reduced, play, settle, visible]);
 
-  return shown;
+  return { shown, ref };
 }

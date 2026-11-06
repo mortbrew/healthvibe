@@ -179,6 +179,10 @@ export function MetricDetail({ metric }: { metric: string }) {
   const bk = sel !== null ? d?.buckets[sel] : null;
   const val = bk ? bk.value : d?.summary;
   const [v, u] = conv(val ?? 0, d?.unit ?? m?.unit ?? null, units);
+  const chartBuckets = (d?.buckets ?? []).map((bkt) => {
+    const [cv, cu] = conv(bkt.value, d?.unit ?? m?.unit ?? null, units);
+    return { ...bkt, value: cv, title: bkt.has ? `${bkt.title} · ${cv.toFixed(1)} ${cu}` : bkt.title };
+  });
   const pinned = !!onSummary;
   const toggle = async () => {
     if (onSummary == null || !m) return;
@@ -249,7 +253,7 @@ export function MetricDetail({ metric }: { metric: string }) {
             <small>{u || (m ? unitLabel(m) : "")}</small>
           </p>
           <p className="muted small">{bk ? bk.title : (d ? rangeLabel(range, d) : "…")}</p>
-          <RangeChart buckets={d?.buckets ?? []} color={c.color} height={220} selected={sel} onSelect={setSel} onSwipe={(dir) => setOffset(Math.max(0, offset + dir))} dots={d?.agg !== "sum"} />
+          <RangeChart buckets={chartBuckets} color={c.color} height={220} selected={sel} onSelect={setSel} onSwipe={(dir) => setOffset(Math.max(0, offset + dir))} dots={d?.agg !== "sum"} />
           <Pager offset={offset} setOffset={setOffset} />
         </section>
       )}

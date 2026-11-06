@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { RING_DRAW_MS, easeOutRing, ringMotion } from "./ring-motion";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { drawMode, drawProgress } from "./draw-clock";
+import { RING_DRAW_MS, easeOutRing } from "./ring-motion";
 
 export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() =>
@@ -19,42 +20,96 @@ function finite(n: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/** True once `el` is on screen and the document is visible. Hidden time does not count. */
+export function useVisibleElement() {
+  const [node, setNode] = useState<Element | null>(null);
+  const [visible, setVisible] = useState(false);
+  const hit = useRef(false);
+  const ref = useCallback((el: Element | null) => setNode(el), []);
+  useEffect(() => {
+    if (!node) {
+      hit.current = false;
+      setVisible(false);
+      return;
+    }
+    const publish = () => setVisible(hit.current && document.visibilityState === "visible");
+    let io: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver === "undefined") hit.current = true;
+    else {
+      io = new IntersectionObserver((entries) => {
+        hit.current = entries.some((e) => e.isIntersecting);
+        publish();
+      }, { threshold: [0, 0.05] });
+      io.observe(node);
+    }
+    publish();
+    document.addEventListener("visibilitychange", publish);
+    // Some WebKit builds never deliver IntersectionObserver for an SVG.
+    // If the document is showing, start the draw anyway so it cannot stay blank.
+    const fallback = window.setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        hit.current = true;
+        publish();
+      }
+    }, 350);
+    return () => {
+      window.clearTimeout(fallback);
+      io?.disconnect();
+      document.removeEventListener("visibilitychange", publish);
+    };
+  }, [node]);
+  return { ref, visible };
+}
+
 /**
- * Drive all rings in one set from the same clock. Replays when `replayKey`
- * or the target fractions change (a new day, or values arriving). Identical
- * rerenders keep the finished pose. Reduced motion shows the end state
- * immediately, including if the preference flips while the draw is running.
- * `settle` also snaps to the end (the day sliding off screen) without a draw.
+ * Drive all rings in one set from the same clock. The draw starts on the first
+ * frame the SVG is actually on screen, so a deferred mobile callback cannot
+ * finish the ring before it is visible. Replays when `replayKey` or the
+ * fractions change. The same signature does not replay. Reduced motion snaps,
+ * including a live change, and does not count as a finished play. `settle`
+ * snaps the day that is sliding away.
  */
-export function useRingMotion(targets: readonly number[], replayKey = "", settle = false): number[] {
+export function useRingMotion(targets: readonly number[], replayKey = "", settle = false): { shown: number[]; ref: (el: Element | null) => void } {
   const reduced = usePrefersReducedMotion();
+  const { ref, visible } = useVisibleElement();
   const goal = targets.map(finite);
   const sig = `${replayKey}\0${goal.map((n) => n.toFixed(4)).join(",")}`;
-  const snap0 =
-    settle ||
-    (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const snap0 = settle || (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [shown, setShown] = useState<number[]>(() => (snap0 ? goal : goal.map(() => 0)));
   const played = useRef<string | null>(null);
 
   useEffect(() => {
-    const mode = settle ? "snap" : ringMotion(played.current, sig, reduced);
+    const mode = drawMode({ played: played.current, sig, reduced, visible, settle });
     if (mode === "keep") return;
+    if (mode === "wait") {
+      setShown(goal.map(() => 0));
+      return;
+    }
     if (mode === "snap" || goal.every((n) => n === 0)) {
-      played.current = sig;
+      // A snap is not a finished draw. Turning motion back on must still play.
+      played.current = goal.every((n) => n === 0) && !reduced ? sig : null;
       setShown(goal);
       return;
     }
-    played.current = sig;
     let raf = 0;
+    let origin: number | null = null;
     let finished = false;
-    const t0 = performance.now();
     setShown(goal.map(() => 0));
     const tick = (now: number) => {
-      const t = Math.min(1, (now - t0) / RING_DRAW_MS);
-      const e = easeOutRing(t);
+      if (document.visibilityState === "hidden") {
+        origin = null;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      const step = drawProgress(origin, now, RING_DRAW_MS);
+      origin = step.origin;
+      const e = easeOutRing(step.t);
       setShown(goal.map((v) => v * e));
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else finished = true;
+      if (step.t < 1) raf = requestAnimationFrame(tick);
+      else {
+        finished = true;
+        played.current = sig;
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => {
@@ -63,7 +118,7 @@ export function useRingMotion(targets: readonly number[], replayKey = "", settle
     };
     // goal is encoded in sig
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, reduced, settle]);
+  }, [sig, reduced, settle, visible]);
 
-  return shown;
+  return { shown, ref };
 }
