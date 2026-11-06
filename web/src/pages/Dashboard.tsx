@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Activity, api, Body, Dashboard as Dash, explain, Heart, Metric, SeriesData, Sleep, Widget } from "../api";
-import { Bars, Hypnogram, Lines, Rings, sleepLegendRows } from "../components/charts";
+import { Bars, Hypnogram, Lines, sleepLegendRows } from "../components/charts";
 import { Link } from "../router";
-import { GoalFrom, ofGoal } from "../health/rings";
+import { FitRings, GoalFrom, ofGoal, ringsOf } from "../health/rings";
 
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const hm = (min: number) => `${Math.floor(min / 60)}h ${String(Math.round(min % 60)).padStart(2, "0")}m`;
@@ -265,7 +265,7 @@ function WidgetForm(props: { w: Widget; metrics: Metric[]; onSave: (w: Widget) =
   );
 }
 
-function WidgetView({ w, metrics }: { w: Widget; metrics: Metric[] }) {
+export function WidgetView({ w, metrics }: { w: Widget; metrics: Metric[] }) {
   switch (w.kind) {
     case "activity":
       return <Loaded path="/dashboard/activity" render={(a: Activity) => <ActivityCard a={a} />} />;
@@ -347,7 +347,7 @@ function Empty({ what }: { what: string }) {
   return <p className="muted empty-inline">No {what} data in your imports yet.</p>;
 }
 
-function ActivityCard({ a }: { a: Activity }) {
+export function ActivityCard({ a }: { a: Activity }) {
   const r = a.rings;
   return (
     <section className="card activity">
@@ -356,7 +356,7 @@ function ActivityCard({ a }: { a: Activity }) {
         <Empty what="activity" />
       ) : (
         <div className="rings-row">
-          <Rings move={[r.move_kcal, r.move_goal]} exercise={[r.exercise_min, r.exercise_goal]} stand={[r.stand_hours, r.stand_goal]} size={200} />
+          <FitRings v={ringsOf(r)} size={168} replayKey={r.date} />
           <dl className="ring-stats">
             <div>
               <dt>Move</dt>

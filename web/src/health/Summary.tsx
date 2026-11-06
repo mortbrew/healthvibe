@@ -1,13 +1,14 @@
 // Summary (Fitness-style), Activity day view + calendar, Steps & Distance details.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, api, SeriesData } from "../api";
+import { Activity } from "../api";
 import { Link, navigate } from "../router";
 import { useHealth, conv } from "./ctx";
-import { BrowseMetric, cat, CatIcon, ChevronCircle, DEFAULT_PINNED, DISTANCE, ENERGY, fmtNum, Spark, STEPS, unitLabel, useApi, useBrowse, when } from "./meta";
+import { DISTANCE, ENERGY, STEPS, useApi, useBrowse } from "./meta";
+import { Board } from "./Board";
 import { addDays, rangeLabel, Range, RangeChart, Segmented, today, useRange, dayTitle } from "./range";
 import { FitRings, GoalFrom, noGoals, ringsOf } from "./rings";
 import { NoGoalsAlert } from "./Goals";
-import { CalIcon, CheckIcon, LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
+import { CalIcon, LargeTitle, NavBar, RoundBtn, XIcon } from "./ui";
 
 export const EXERCISE = "HKQuantityTypeIdentifierAppleExerciseTime";
 export const STAND = "HKCategoryTypeIdentifierAppleStandHour";
@@ -20,177 +21,19 @@ const prettyWorkout = (m: string) => m.replace(/^HKWorkoutActivityType/, "").rep
 
 export default function Summary() {
   const act = useApi<Activity>("/dashboard/activity");
-  const browse = useBrowse();
   const r = act.data?.rings;
-  const metrics = browse.data?.metrics ?? [];
-  const [editPins, setEditPins] = useState(false);
   const showAlert = noGoals(r) && (r == null || r.date === today());
   return (
-    <div className="page summary">
-      <LargeTitle title="Summary" />
+    <>
       <NoGoalsAlert show={showAlert} />
-      <Pinned metrics={metrics} activity={r} edit={editPins} setEdit={setEditPins} />
-      <div className="fit-actions">
-        <button type="button" className="pill fit-action" onClick={() => setEditPins(true)}>Edit Summary</button>
-        <Link to="/fitness" className="pill fit-action">See All Categories</Link>
-      </div>
-    </div>
+      <Board which="summary" />
+    </>
   );
 }
 
 export function WorkoutIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="14" cy="4" r="2.4" /><path d="M10.5 7.5 7 10l1 1.6 2.6-1.6 1 3.5-3.6 4.2 1.5 1.3 4-4.4 1.5 2.4v4h2v-4.6l-2-3.4.8-3.2 1.4 1.8H20v-2h-2.8l-2.4-3a2 2 0 0 0-1.6-.8Z" /></svg>;
 }
-
-/* ---------- Pinned ---------- */
-
-function Pinned({ metrics, activity, edit, setEdit }: { metrics: BrowseMetric[]; activity: Activity["rings"] | null | undefined; edit: boolean; setEdit: (v: boolean) => void }) {
-  const [pins, setPins] = useState<string[] | null>(null);
-  const [draft, setDraft] = useState<string[]>([]);
-  const [q, setQ] = useState("");
-  const drag = useRef<number | null>(null);
-  useEffect(() => {
-    api<{ pinned: string[] }>("/pinned").then((r) => setPins(r.pinned), () => setPins([]));
-  }, []);
-  const have = new Set(metrics.map((m) => m.metric));
-  const list = pins === null ? [] : pins.length ? pins : DEFAULT_PINNED.filter((p) => have.has(p));
-  const save = async (next: string[]) => {
-    setPins(next);
-    await api("/pinned", { method: "PUT", body: { pinned: next } }).catch(() => {});
-  };
-  useEffect(() => { if (edit) { setDraft(list.slice()); setQ(""); } }, [edit]); // eslint-disable-line react-hooks/exhaustive-deps
-  const openEdit = () => setEdit(true);
-  const done = async () => {
-    await save(draft);
-    setEdit(false);
-  };
-  const removeAt = (i: number) => setDraft((d) => d.filter((_, j) => j !== i));
-  const onDragStart = (i: number) => { drag.current = i; };
-  const onDragOver = (e: React.DragEvent, i: number) => {
-    e.preventDefault();
-    if (drag.current == null || drag.current === i) return;
-    setDraft((d) => {
-      const next = d.slice();
-      const [m] = next.splice(drag.current!, 1);
-      next.splice(i, 0, m);
-      drag.current = i;
-      return next;
-    });
-  };
-  const filteredAdd = metrics.filter((m) => !draft.includes(m.metric) && (!q || m.name.toLowerCase().includes(q.toLowerCase())));
-  return (
-    <section className="pinned">
-      <div className="sec-head"><h2>Pinned</h2><button className="link" onClick={openEdit}>Edit</button></div>
-      <div className="pingrid">
-        <ActivityPinCard r={activity ?? null} />
-        {list.map((m) => {
-          const bm = metrics.find((x) => x.metric === m);
-          return bm ? <PinCard key={m} m={bm} /> : null;
-        })}
-      </div>
-      {pins !== null && !list.length && !activity && <p className="muted">Pin metrics from Health to see them here.</p>}
-      {edit && (
-        <Sheet
-          title="Edit Pinned List"
-          onClose={() => setEdit(false)}
-          right={
-            <button type="button" className="roundbtn done-check" aria-label="Done" onClick={done}>
-              <CheckIcon />
-            </button>
-          }
-        >
-          <p className="group-title">Pinned</p>
-          <div className="group edit-pinned-list">
-            {draft.map((id, i) => {
-              const bm = metrics.find((x) => x.metric === id);
-              const label = id === "activity" ? "Activity" : (bm?.name ?? id);
-              return (
-                <div
-                  key={id}
-                  className="row edit-pin-row"
-                  draggable
-                  onDragStart={() => onDragStart(i)}
-                  onDragOver={(e) => onDragOver(e, i)}
-                >
-                  <button type="button" className="minus-btn" aria-label={`Remove ${label}`} onClick={() => removeAt(i)}>−</button>
-                  <span className="row-label">{label}</span>
-                  <span className="drag-handle" aria-hidden>≡</span>
-                </div>
-              );
-            })}
-            {!draft.length && <p className="muted pad">Nothing pinned yet.</p>}
-            <div className="edit-pin-search">
-              <input className="search" type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search metrics to pin" />
-            </div>
-          </div>
-          {filteredAdd.length > 0 && (
-            <>
-              <p className="group-title">Add</p>
-              <div className="group">
-                {filteredAdd.map((m) => (
-                  <button
-                    key={m.metric}
-                    type="button"
-                    className="row"
-                    onClick={() => setDraft((d) => d.length >= 30 ? d : [...d, m.metric])}
-                  >
-                    <span className="row-icon"><CatIcon k={m.category} /></span>
-                    <span className="row-label">{m.name}</span>
-                    <span className="pinmark" aria-hidden>+</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </Sheet>
-      )}
-    </section>
-  );
-}
-
-function ActivityPinCard({ r }: { r: Activity["rings"] | null }) {
-  const n0 = (v: number) => Math.round(v).toLocaleString();
-  return (
-    <Link to={`/activity/${r?.date ?? today()}`} className="card pincard activity-pin">
-      <div className="pin-head" style={{ color: "var(--c-activity)" }}>
-        <CatIcon k="activity" /><b>Activity</b>
-        <span className="muted small pin-when">{r ? when(r.date + "T12:00:00") : ""} <ChevronCircle /></span>
-      </div>
-      <div className="pin-body activity-pin-body">
-        <div className="act-mini-stats">
-          <div><span className="as-label" style={{ color: "var(--move)" }}>Move</span><span className="num">{r ? `${n0(r.move_kcal)} cal` : "--"}</span></div>
-          <div><span className="as-label" style={{ color: "var(--exercise)" }}>Exercise</span><span className="num">{r ? `${n0(r.exercise_min)} min` : "--"}</span></div>
-          <div><span className="as-label" style={{ color: "var(--stand)" }}>Stand</span><span className="num">{r ? `${n0(r.stand_hours)} hr` : "--"}</span></div>
-        </div>
-        <FitRings v={r ? ringsOf(r) : null} size={56} replayKey={r?.date ?? "activity"} />
-      </div>
-    </Link>
-  );
-}
-
-
-function PinCard({ m }: { m: BrowseMetric }) {
-  const { units } = useHealth();
-  const s = useApi<SeriesData>(`/series?metric=${encodeURIComponent(m.metric)}&bucket=day&days=14${m.last ? `&end=${m.last.slice(0, 10)}` : ""}`);
-  const pts = s.data?.points ?? [];
-  const last = pts[pts.length - 1];
-  const c = cat(m.category);
-  const [v, u] = last ? conv(last.value, m.unit, units) : [0, ""];
-  const label = m.metric.startsWith("HKCategory") ? (m.metric.includes("Sleep") ? "" : "") : m.metric === STEPS ? "STEPS" : u;
-  return (
-    <Link to={`/health/metric/${encodeURIComponent(m.metric)}`} className="card pincard">
-      <div className="pin-head" style={{ color: c.color }}>
-        <CatIcon k={m.category} /><b>{m.name}</b>
-        <span className="muted small pin-when">{when(m.latest_at)} <ChevronCircle /></span>
-      </div>
-      <div className="pin-body">
-        <p className="big num">{last ? (m.metric.includes("Sleep") ? `${Math.floor(v / 60)}h ${Math.round(v % 60)}m` : fmtNum(v, m.metric)) : "--"}<small>{last && !m.metric.includes("Sleep") ? label || unitLabel(m) : ""}</small></p>
-        <Spark values={pts.map((p) => p.value)} color={c.color} bars={m.agg === "sum"} />
-      </div>
-    </Link>
-  );
-}
-
 
 /* ---------- Steps / Distance detail ---------- */
 

@@ -4,6 +4,7 @@
 import { useId } from "react";
 import { DayValue } from "../api";
 import { ringFraction, ringLaps } from "../health/ring-motion";
+import { capsuleRadius, stageBarWidth, weekSegmentHeight } from "../health/sleep-geometry";
 import { useRingMotion } from "../health/use-ring-motion";
 
 /** One ring stroke. `progress` may exceed 1; the extra lap is the overlap, not a 100% cap. */
@@ -165,10 +166,10 @@ export function Lines(props: {
 }
 
 export const STAGES = [
-  { key: "Awake", label: "Awake", color: "var(--awake)" },
-  { key: "AsleepREM", label: "REM", color: "var(--rem)" },
-  { key: "AsleepCore", label: "Core", color: "var(--core)" },
-  { key: "AsleepDeep", label: "Deep", color: "var(--deep)" },
+  { key: "Awake", label: "Awake", color: "#ff5e4d" },
+  { key: "AsleepREM", label: "REM", color: "#64d2ff" },
+  { key: "AsleepCore", label: "Core", color: "#3f8ef7" },
+  { key: "AsleepDeep", label: "Deep", color: "#6c5ce7" },
 ];
 
 /** Legend rows for a night: always Awake/REM/Core/Deep; Unspecified and In Bed when present.
@@ -184,11 +185,12 @@ export type NightMins = {
 };
 
 export function sleepLegendRows(n: NightMins): { key: string; label: string; color: string; minutes: number; asleep: boolean }[] {
+  const tone = (key: string) => STAGES.find((s) => s.key === key)?.color ?? "var(--unspecified)";
   const rows = [
-    { key: "Awake", label: "Awake", color: "var(--awake)", minutes: n.awake_min, asleep: false },
-    { key: "AsleepREM", label: "REM", color: "var(--rem)", minutes: n.rem_min, asleep: true },
-    { key: "AsleepCore", label: "Core", color: "var(--core)", minutes: n.core_min, asleep: true },
-    { key: "AsleepDeep", label: "Deep", color: "var(--deep)", minutes: n.deep_min, asleep: true },
+    { key: "Awake", label: "Awake", color: tone("Awake"), minutes: n.awake_min, asleep: false },
+    { key: "AsleepREM", label: "REM", color: tone("AsleepREM"), minutes: n.rem_min, asleep: true },
+    { key: "AsleepCore", label: "Core", color: tone("AsleepCore"), minutes: n.core_min, asleep: true },
+    { key: "AsleepDeep", label: "Deep", color: tone("AsleepDeep"), minutes: n.deep_min, asleep: true },
   ];
   if (n.unspecified_min > 0) {
     rows.push({
@@ -222,8 +224,10 @@ export function asleepFromLegend(n: NightMins): number {
  */
 export function Hypnogram(props: { segments: { stage: string; start: string; end: string }[] }) {
   const uid = useId().replace(/:/g, "");
-  const H = 248;
-  const pad = { l: 52, r: 10, t: 12, b: 26 };
+  // Phone-like aspect. A 640-wide viewBox made the lanes short and the bars fat.
+  const plotW = 360;
+  const H = 268;
+  const pad = { l: 52, r: 8, t: 12, b: 26 };
   const segs = props.segments
     .filter((s) => STAGES.some((st) => st.key === s.stage) || s.stage === "AsleepUnspecified")
     .slice()
@@ -245,9 +249,9 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
   }
   const axis0 = Math.min(t0, ticks[0] ?? t0);
   const axis1 = Math.max(t1, ticks[ticks.length - 1] ?? t1);
-  const x = (v: number) => pad.l + ((W - pad.l - pad.r) * (v - axis0)) / Math.max(axis1 - axis0, 1);
+  const x = (v: number) => pad.l + ((plotW - pad.l - pad.r) * (v - axis0)) / Math.max(axis1 - axis0, 1);
   const rowH = (H - pad.t - pad.b) / STAGES.length;
-  const barH = Math.min(28, rowH * 0.52);
+  const barH = (stage: string) => (stage === "Awake" ? 14 : 18);
   const row = (stage: string) => {
     const i = STAGES.findIndex((s) => s.key === stage);
     return i < 0 ? 2 : i;
@@ -259,25 +263,33 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
     const d = new Date(ms);
     return `${String(d.getHours()).padStart(2, "0")}:00`;
   };
-  const links = segs.slice(1).flatMap((s, i) => {
-    const prev = segs[i];
-    if (row(prev.stage) === row(s.stage)) return [];
-    const xj = (x(parseLocal(prev.end)) + x(parseLocal(s.start))) / 2;
-    const yA = yC(prev.stage);
-    const yB = yC(s.stage);
-    const top = Math.min(yA, yB);
-    const bot = Math.max(yA, yB);
+  const bars = segs.map((s) => {
+    const x1 = x(parseLocal(s.start));
+    const x2 = x(parseLocal(s.end));
+    const h = barH(s.stage);
+    const w = stageBarWidth(x2 - x1, s.stage === "Awake");
+    const mid = (x1 + x2) / 2;
+    return { stage: s.stage, left: mid - w / 2, right: mid + w / 2, y: yC(s.stage), h, w };
+  });
+  const links = bars.slice(1).flatMap((b, i) => {
+    const prev = bars[i];
+    if (row(prev.stage) === row(b.stage)) return [];
+    const xj = (prev.right + b.left) / 2;
+    const down = b.y >= prev.y;
+    const top = down ? prev.y + prev.h / 2 : b.y + b.h / 2;
+    const bot = down ? b.y - b.h / 2 : prev.y - prev.h / 2;
+    if (bot - top < 1) return [];
     return [{
       id: `${uid}-c${i}`,
       xj,
       top,
       bot,
-      topColor: yA <= yB ? colorOf(prev.stage) : colorOf(s.stage),
-      botColor: yA <= yB ? colorOf(s.stage) : colorOf(prev.stage),
+      topColor: down ? colorOf(prev.stage) : colorOf(b.stage),
+      botColor: down ? colorOf(b.stage) : colorOf(prev.stage),
     }];
   });
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="chart hypnogram" role="img" aria-label="Sleep stages last night">
+    <svg viewBox={`0 0 ${plotW} ${H}`} className="chart hypnogram" role="img" aria-label="Sleep stages last night">
       <defs>
         {links.map((l) => (
           <linearGradient key={l.id} id={l.id} gradientUnits="userSpaceOnUse" x1={l.xj} y1={l.top} x2={l.xj} y2={l.bot}>
@@ -290,34 +302,28 @@ export function Hypnogram(props: { segments: { stage: string; start: string; end
         const y = pad.t + rowH * i + rowH / 2;
         return (
           <g key={s.key}>
-            <line x1={pad.l - 2} x2={W - pad.r} y1={y} y2={y} stroke="var(--border)" />
-            <text x={0} y={y + 4} className="axis">{s.label}</text>
+            <line x1={pad.l} x2={plotW - pad.r} y1={y} y2={y} stroke="var(--border)" strokeOpacity="0.55" />
+            <text x={0} y={y + 3} className="axis">{s.label}</text>
           </g>
         );
       })}
       {links.map((l) => (
-        <line key={l.id} x1={l.xj} y1={l.top} x2={l.xj} y2={l.bot} stroke={`url(#${l.id})`} strokeWidth={2.6} />
+        <line key={l.id} x1={l.xj} y1={l.top} x2={l.xj} y2={l.bot} stroke={`url(#${l.id})`} strokeWidth={1.6} />
       ))}
-      {segs.map((s, i) => {
-        const x1 = x(parseLocal(s.start));
-        const x2 = x(parseLocal(s.end));
-        const w = Math.max(x2 - x1, barH * 0.9);
-        const mid = (x1 + x2) / 2;
-        return (
-          <rect
-            key={i}
-            x={mid - w / 2}
-            y={yC(s.stage) - barH / 2}
-            width={w}
-            height={barH}
-            rx={barH / 2}
-            ry={barH / 2}
-            fill={colorOf(s.stage)}
-          />
-        );
-      })}
+      {bars.map((b, i) => (
+        <rect
+          key={i}
+          x={b.left}
+          y={b.y - b.h / 2}
+          width={b.w}
+          height={b.h}
+          rx={capsuleRadius(b.w, b.h)}
+          ry={capsuleRadius(b.w, b.h)}
+          fill={colorOf(b.stage)}
+        />
+      ))}
       {ticks.map((h) => (
-        <text key={h} x={Math.min(W - pad.r, Math.max(pad.l, x(h)))} y={H - 6} textAnchor="middle" className="axis">
+        <text key={h} x={Math.min(plotW - pad.r, Math.max(pad.l, x(h)))} y={H - 6} textAnchor="middle" className="axis">
           {fmtTick(h)}
         </text>
       ))}
@@ -342,10 +348,10 @@ function minsFromOrigin(ms: number, originHour = 21): number {
 }
 
 const STAGE_COLOR: Record<string, string> = {
-  Awake: "var(--awake)",
-  AsleepREM: "var(--rem)",
-  AsleepCore: "var(--core)",
-  AsleepDeep: "var(--deep)",
+  Awake: STAGES[0].color,
+  AsleepREM: STAGES[1].color,
+  AsleepCore: STAGES[2].color,
+  AsleepDeep: STAGES[3].color,
   AsleepUnspecified: "var(--unspecified)",
   InBed: "var(--inbed)",
 };
@@ -371,13 +377,14 @@ export function FloatingSleepBars(props: {
   spanHours?: number;
   labels?: "dow" | "day" | "month" | "none";
 }) {
-  const H = props.height ?? 220;
+  const plotW = 360;
+  const H = props.height ?? 300;
   const origin = props.originHour ?? 21;
   const span = (props.spanHours ?? 12) * 60;
-  const pad = { l: 8, r: 44, t: 8, b: 22 };
+  const pad = { l: 6, r: 46, t: 8, b: 22 };
   const nights = props.nights;
   const n = Math.max(nights.length, 1);
-  const bw = (W - pad.l - pad.r) / n;
+  const bw = (plotW - pad.l - pad.r) / n;
   const y = (mins: number) => pad.t + ((H - pad.t - pad.b) * mins) / span;
   const ticks: number[] = [];
   for (let h = 0; h <= (props.spanHours ?? 12); h += 2) ticks.push(h * 60);
@@ -396,11 +403,11 @@ export function FloatingSleepBars(props: {
   const asleepish = (stage: string) =>
     stage === "AsleepREM" || stage === "AsleepCore" || stage === "AsleepDeep" || stage === "AsleepUnspecified";
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="chart sleep-float" role="img" aria-label="Sleep by time of night">
+    <svg viewBox={`0 0 ${plotW} ${H}`} className="chart sleep-float" role="img" aria-label="Sleep by time of night">
       {ticks.map((m) => (
         <g key={m}>
-          <line x1={pad.l} x2={W - pad.r} y1={y(m)} y2={y(m)} stroke="var(--border)" strokeDasharray="3 5" />
-          <text x={W - pad.r + 6} y={y(m) + 4} className="axis">{fmtTick(m)}</text>
+          <line x1={pad.l} x2={plotW - pad.r} y1={y(m)} y2={y(m)} stroke="var(--border)" strokeOpacity="0.45" />
+          <text x={plotW - pad.r + 4} y={y(m) + 3} className="axis">{fmtTick(m)}</text>
         </g>
       ))}
       {nights.map((night, i) => {
@@ -409,13 +416,10 @@ export function FloatingSleepBars(props: {
           ? segs.filter((s) => asleepish(s.stage))
           : segs.filter((s) => asleepish(s.stage) || s.stage === "Awake");
         const cx = pad.l + i * bw;
-        const barW = Math.max(4, bw * 0.55);
+        const barW = Math.max(3, Math.min(bw * 0.86, bw * 0.55));
         const x0 = cx + (bw - barW) / 2;
         return (
           <g key={night.date + i}>
-            {i > 0 && (
-              <line x1={cx} x2={cx} y1={pad.t} y2={H - pad.b} stroke="var(--border)" strokeDasharray="2 4" opacity={0.7} />
-            )}
             {draw.map((s, j) => {
               const a = minsFromOrigin(parseLocal(s.start), origin);
               const b = minsFromOrigin(parseLocal(s.end), origin);
@@ -424,10 +428,9 @@ export function FloatingSleepBars(props: {
               if (bot < 0 || top > span) return null;
               const y1 = y(Math.max(0, top));
               const y2 = y(Math.min(span, bot));
-              const hSeg = Math.max(2, y2 - y1);
-              const rad = Math.min(barW * 0.45, hSeg / 2);
+              const hSeg = weekSegmentHeight(y2 - y1);
               const fill = props.plain ? "var(--sleep-plain, #9b8cff)" : (STAGE_COLOR[s.stage] ?? "var(--core)");
-              return <rect key={j} x={x0} y={y1} width={barW} height={hSeg} fill={fill} rx={rad} ry={rad} />;
+              return <rect key={j} x={x0} y={y1} width={barW} height={hSeg} fill={fill} rx={capsuleRadius(barW, hSeg)} ry={capsuleRadius(barW, hSeg)} />;
             })}
             {props.labels !== "none" && (props.labels === "dow" || props.labels === "day" || i % Math.ceil(n / 6) === 0 || i === n - 1) && (
               <text x={cx + bw / 2} y={H - 6} textAnchor="middle" className="axis">{xLabel(night.date)}</text>

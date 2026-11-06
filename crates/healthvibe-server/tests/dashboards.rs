@@ -121,7 +121,31 @@ async fn crud_and_seeded_default() {
     let list = v["dashboards"].as_array().unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["name"], "Summary");
-    assert_eq!(list[0]["widgets"].as_array().unwrap().len(), 5);
+    assert_eq!(list[0]["builtin"], "summary");
+    assert_eq!(
+        list[0]["widgets"].as_array().unwrap().len(),
+        0,
+        "new Summary is blank"
+    );
+    let summary_id = list[0]["id"].as_i64().unwrap();
+    let (s, _, _) = call(
+        &app,
+        "DELETE",
+        &format!("/api/v1/dashboards/{summary_id}"),
+        c,
+        None,
+    )
+    .await;
+    assert_eq!(s, 400, "Summary cannot be deleted");
+    let (s, _, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/v1/dashboards/{summary_id}"),
+        c,
+        Some(json!({"name": "Renamed"})),
+    )
+    .await;
+    assert_eq!(s, 400, "Summary cannot be renamed");
 
     let w = json!([{"id":"a","kind":"line","metric":"healthvibe.hae.tooth_brushing","days":90,"bucket":"week","size":2}]);
     let (s, v, _) = call(
@@ -295,4 +319,213 @@ async fn dashboards_and_metrics_are_per_user() {
             .0,
         400
     );
+}
+
+#[tokio::test]
+async fn seeded_summary_clears_but_custom_widgets_and_pins_stay() {
+    let (app, db) = app().await;
+    let (admin, sam) = two_users(&app).await;
+    let seeded = serde_json::to_string(&healthvibe_core::dashboards::default_widgets()).unwrap();
+    sqlx::query(
+        "INSERT INTO dashboards (user_id, name, position, widgets_json, created_at, updated_at)
+         VALUES (1, 'Summary', 0, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&seeded)
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pinned_metrics (user_id, metric, position) VALUES (1, 'HKQuantityTypeIdentifierStepCount', 0)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let custom =
+        json!([{"id":"keep","kind":"activity","days":30,"bucket":"day","size":2}]).to_string();
+    sqlx::query(
+        "INSERT INTO dashboards (user_id, name, position, widgets_json, created_at, updated_at)
+         VALUES (2, 'Summary', 0, ?, '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z')",
+    )
+    .bind(&custom)
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pinned_metrics (user_id, metric, position) VALUES (2, 'HKQuantityTypeIdentifierBodyMass', 0)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (_, v, _) = call(&app, "GET", "/api/v1/dashboards", Some(&admin), None).await;
+    let list = v["dashboards"].as_array().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["builtin"], "summary");
+    assert_eq!(
+        list[0]["widgets"][0]["metric"],
+        "HKQuantityTypeIdentifierStepCount"
+    );
+    assert_eq!(
+        list[0]["widgets"].as_array().unwrap().len(),
+        1,
+        "stored pins become cards once"
+    );
+
+    let (_, v, _) = call(&app, "GET", "/api/v1/dashboards", Some(&sam), None).await;
+    assert_eq!(
+        v["dashboards"][0]["widgets"][0]["id"], "keep",
+        "edited Summary is not wiped"
+    );
+    assert_eq!(
+        v["dashboards"][0]["widgets"][1]["metric"], "HKQuantityTypeIdentifierBodyMass",
+        "pins are appended onto an edited Summary"
+    );
+    let (_, v, _) = call(&app, "GET", "/api/v1/dashboards", Some(&sam), None).await;
+    assert_eq!(
+        v["dashboards"][0]["widgets"].as_array().unwrap().len(),
+        2,
+        "pin import does not repeat"
+    );
+
+    let (_, v, _) = call(&app, "GET", "/api/v1/nav", Some(&admin), None).await;
+    let kinds: Vec<&str> = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["summary", "fitness", "health", "add"]);
+
+    let (s, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/dashboards",
+        Some(&admin),
+        Some(json!({"name": "Night", "widgets": []})),
+    )
+    .await;
+    assert_eq!(s, 201);
+    assert_eq!(v["dashboard"]["widgets"].as_array().unwrap().len(), 0);
+    let new_id = v["dashboard"]["id"].as_i64().unwrap();
+    let (_, v, _) = call(&app, "GET", "/api/v1/nav", Some(&admin), None).await;
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items[items.len() - 2]["id"], new_id);
+    assert_eq!(items.last().unwrap()["kind"], "add");
+    assert_eq!(
+        call(&app, "GET", "/api/v1/nav", Some(&sam), None).await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+
+    let (s, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/nav",
+        Some(&sam),
+        Some(json!({"items":[{"kind":"summary"},{"kind":"health"},{"kind":"fitness"},{"kind":"add"}]})),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let (s, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/nav",
+        Some(&sam),
+        Some(json!({"items":[{"kind":"fitness"},{"kind":"health"},{"kind":"add"}]})),
+    )
+    .await;
+    assert_eq!(s, 400, "Summary cannot leave the nav");
+    let (s, _, _) = call(
+        &app,
+        "PUT",
+        "/api/v1/nav",
+        Some(&sam),
+        Some(json!({"items":[
+            {"kind":"summary"},
+            {"kind":"fitness"},
+            {"kind":"health"},
+            {"kind":"dashboard","id": new_id},
+            {"kind":"add"}
+        ]})),
+    )
+    .await;
+    assert_eq!(s, 400, "another user's dashboard cannot enter the nav");
+    let (_, v, _) = call(&app, "GET", "/api/v1/nav", Some(&admin), None).await;
+    assert_eq!(
+        v["items"][v["items"].as_array().unwrap().len() - 2]["id"],
+        new_id
+    );
+}
+
+#[tokio::test]
+async fn pins_without_a_dashboard_become_summary_cards_once() {
+    let (app, db) = app().await;
+    let (admin, _) = two_users(&app).await;
+    sqlx::query(
+        "INSERT INTO pinned_metrics (user_id, metric, position) VALUES (1, 'HKQuantityTypeIdentifierStepCount', 0)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (_, v, _) = call(&app, "GET", "/api/v1/dashboards", Some(&admin), None).await;
+    assert_eq!(v["dashboards"][0]["builtin"], "summary");
+    assert_eq!(
+        v["dashboards"][0]["widgets"][0]["metric"],
+        "HKQuantityTypeIdentifierStepCount"
+    );
+    let id = v["dashboards"][0]["id"].as_i64().unwrap();
+    let (s, _, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/v1/dashboards/{id}"),
+        Some(&admin),
+        Some(json!({"widgets": []})),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let (_, v, _) = call(&app, "GET", "/api/v1/dashboards", Some(&admin), None).await;
+    assert_eq!(
+        v["dashboards"][0]["widgets"].as_array().unwrap().len(),
+        0,
+        "clearing Summary does not restore pins"
+    );
+    let (s, v, _) = call(
+        &app,
+        "POST",
+        "/api/v1/dashboards",
+        Some(&admin),
+        Some(json!({"name": "Night"})),
+    )
+    .await;
+    assert_eq!(s, 201);
+    assert_eq!(v["dashboard"]["widgets"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn renamed_seed_is_kept_and_a_blank_summary_is_added() {
+    let (app, db) = app().await;
+    let (admin, _) = two_users(&app).await;
+    let seeded = serde_json::to_string(&healthvibe_core::dashboards::default_widgets()).unwrap();
+    sqlx::query(
+        "INSERT INTO dashboards (user_id, name, position, widgets_json, created_at, updated_at)
+         VALUES (1, 'Training', 0, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(&seeded)
+    .execute(&db)
+    .await
+    .unwrap();
+    let (_, v, _) = call(&app, "GET", "/api/v1/dashboards", Some(&admin), None).await;
+    let list = v["dashboards"].as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    let summary = list.iter().find(|d| d["builtin"] == "summary").unwrap();
+    let training = list.iter().find(|d| d["name"] == "Training").unwrap();
+    assert_eq!(summary["widgets"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        training["widgets"].as_array().unwrap().len(),
+        healthvibe_core::dashboards::default_widgets().len(),
+        "a renamed copy of the seed is not cleared"
+    );
+    assert!(training["builtin"].is_null());
 }

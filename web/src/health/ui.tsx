@@ -43,6 +43,24 @@ export const CalIcon = () => (
     <path d="M4.5 10.5h15M8 3.8v4.2M16 3.8v4.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
   </Glyph>
 );
+/** Remove control: circle and bar share one 24px box so the mark stays centered. */
+export const MinusIcon = () => (
+  <Glyph>
+    <circle cx="12" cy="12" r="9" fill="#8e8e93" />
+    <path d="M8 12h8" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+  </Glyph>
+);
+export const GripIcon = () => (
+  <Glyph>
+    <g fill="currentColor">
+      <circle cx="9" cy="7" r="1.25" /><circle cx="15" cy="7" r="1.25" />
+      <circle cx="9" cy="12" r="1.25" /><circle cx="15" cy="12" r="1.25" />
+      <circle cx="9" cy="17" r="1.25" /><circle cx="15" cy="17" r="1.25" />
+    </g>
+  </Glyph>
+);
+export const UpIcon = () => <Glyph><path d="M6 14.5 12 8.5l6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></Glyph>;
+export const DownIcon = () => <Glyph><path d="M6 9.5 12 15.5l6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></Glyph>;
 
 export function back(fallback: string) {
   if (history.length > 1 && document.referrer !== "" ) history.back();
@@ -64,6 +82,12 @@ export function Sheet({ title, onClose, children, left, right }: { title: string
   const startY = useRef<number | null>(null);
   const [dy, setDy] = useState(0);
   const onTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement | null;
+    // Buttons, fields, and reorder grips keep the gesture. A sheet swipe must not eat the click.
+    if (target?.closest("button, a, input, textarea, select, [data-grip]")) {
+      startY.current = null;
+      return;
+    }
     const body = (e.currentTarget as HTMLElement).querySelector(".sheet-body") as HTMLElement | null;
     if (body && body.scrollTop > 0) { startY.current = null; return; }
     startY.current = e.touches[0].clientY;

@@ -10,9 +10,10 @@ import {
 } from "../components/charts";
 import { Link } from "../router";
 import { conv, useHealth } from "./ctx";
-import { BrowseMetric, CATEGORIES, cat, CatIcon, Chevron, fmtNum, hm, SLEEP, unitLabel, useApi, useBrowse, when, DEFAULT_PINNED } from "./meta";
+import { BrowseMetric, CATEGORIES, cat, CatIcon, Chevron, fmtNum, hm, SLEEP, unitLabel, useApi, useBrowse, when } from "./meta";
+import { summaryHasMetric, toggleSummaryMetric } from "./Board";
 import { addDays, Range, RangeChart, rangeLabel, Segmented, today, useRange } from "./range";
-import { LargeTitle, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
+import { LargeTitle, MinusIcon, NavBar, RoundBtn, Sheet, XIcon } from "./ui";
 import { Pager } from "./Summary";
 
 function MetricRow({ m }: { m: BrowseMetric }) {
@@ -37,7 +38,7 @@ export default function Browse() {
   const hits = q ? ms.filter((m) => m.name.toLowerCase().includes(q.toLowerCase())) : [];
   return (
     <div className="page">
-      <LargeTitle title="Browse" />
+      <LargeTitle title="All Categories" />
       <input className="search" type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search health data" enterKeyHint="search" />
       {q ? (
         <div className="group">{hits.map((m) => <MetricRow key={m.metric} m={m} />)}{!hits.length && <p className="muted pad">No matches.</p>}</div>
@@ -155,13 +156,15 @@ export function MetricDetail({ metric }: { metric: string }) {
   const b = useBrowse();
   const m = b.data?.metrics.find((x) => x.metric === metric);
   const isSleep = metric === SLEEP;
-  const [range, setRange] = useState<Range>(isSleep ? "W" : "W");
+  const [range, setRange] = useState<Range>(isSleep ? "D" : "W");
   const [offset, setOffset] = useState(0);
   const [sel, setSel] = useState<number | null>(null);
-  const [pins, setPins] = useState<string[] | null>(null);
+  const [onSummary, setOnSummary] = useState<boolean | null>(null);
   const [more, setMore] = useState(false);
   const [highlights, setHighlights] = useState(false);
-  useEffect(() => { api<{ pinned: string[] }>("/pinned").then((r) => setPins(r.pinned.length ? r.pinned : DEFAULT_PINNED), () => setPins([])); }, []);
+  useEffect(() => {
+    summaryHasMetric().then((s) => setOnSummary(!!s?.widgets.some((w) => w.metric === metric)), () => setOnSummary(false));
+  }, [metric]);
   const anchor = b.data ? (m?.last?.slice(0, 10) ?? today()) : null;
   const d = useRange(metric, range, anchor, offset);
   useEffect(() => setSel(null), [range, offset]);
@@ -176,12 +179,11 @@ export function MetricDetail({ metric }: { metric: string }) {
   const bk = sel !== null ? d?.buckets[sel] : null;
   const val = bk ? bk.value : d?.summary;
   const [v, u] = conv(val ?? 0, d?.unit ?? m?.unit ?? null, units);
-  const pinned = pins?.includes(metric);
+  const pinned = !!onSummary;
   const toggle = async () => {
-    if (!pins) return;
-    const next = pinned ? pins.filter((p) => p !== metric) : [...pins, metric];
-    setPins(next);
-    await api("/pinned", { method: "PUT", body: { pinned: next } }).catch(() => {});
+    if (onSummary == null || !m) return;
+    const now = await toggleSummaryMetric(metric, m.name).catch(() => pinned);
+    setOnSummary(now);
   };
 
   const nightsInRange = useMemo(() => {
@@ -227,7 +229,6 @@ export function MetricDetail({ metric }: { metric: string }) {
               nights={chartNights.map((n) => ({ date: n.date, asleep_min: n.asleep_min, segments: n.segments, in_bed_min: n.in_bed_min }))}
               plain={false}
               labels={range === "W" ? "dow" : range === "M" ? "day" : "month"}
-              height={range === "6M" ? 200 : 220}
             />
           )}
           {range === "D" && dayNight && (
@@ -262,12 +263,12 @@ export function MetricDetail({ metric }: { metric: string }) {
 
       <p className="group-title">More</p>
       <div className="group">
-        <button type="button" className="row" onClick={toggle} disabled={!pins}>
-          <span className="row-label">{pinned ? "Remove from Pinned" : "Add to Pinned"}</span>
-          <span className={pinned ? "pinmark on" : "pinmark"} aria-hidden>{pinned ? "−" : "+"}</span>
+        <button type="button" className="row" onClick={toggle} disabled={onSummary == null}>
+          <span className="row-label">{pinned ? "Remove from Summary" : "Add to Summary"}</span>
+          <span className={pinned ? "pinmark on" : "pinmark"} aria-hidden>{pinned ? <MinusIcon /> : "+"}</span>
         </button>
       </div>
-      <p className="group-foot">Pinned topics will appear at the top of Summary.</p>
+      <p className="group-foot">Added topics show up as cards on Summary.</p>
       <div className="group">
         <Link to={`/health/metric/${encodeURIComponent(metric)}/all`} className="row"><span className="row-label">Show All Data</span><Chevron /></Link>
         <div className="row static"><span className="row-label">Data Sources & Access</span><Chevron /></div>

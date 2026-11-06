@@ -74,6 +74,7 @@ pub fn routes() -> Router<AppState> {
                 .put(update_dashboard)
                 .delete(delete_dashboard),
         )
+        .route("/nav", get(get_nav).put(put_nav))
         .merge(crate::sync::routes())
 }
 
@@ -635,6 +636,7 @@ async fn create_dashboard(
         return Err(bad("too_many_dashboards"));
     }
     let id = dashboards::create(&st.db, u.id, &name, &ws).await?;
+    dashboards::insert_dashboard_nav(&st.db, u.id, id).await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "dashboard": dashboards::get(&st.db, u.id, id).await? })),
@@ -662,12 +664,13 @@ async fn update_dashboard(
     if let Some(ws) = &b.widgets {
         dashboards::validate(ws).map_err(bad)?;
     }
-    if !dashboards::update(&st.db, u.id, id, name.as_deref(), b.widgets.as_deref()).await? {
-        return Err(not_found());
+    match dashboards::update(&st.db, u.id, id, name.as_deref(), b.widgets.as_deref()).await? {
+        Ok(true) => Ok(Json(
+            json!({ "dashboard": dashboards::get(&st.db, u.id, id).await? }),
+        )),
+        Ok(false) => Err(not_found()),
+        Err(code) => Err(bad(code)),
     }
-    Ok(Json(
-        json!({ "dashboard": dashboards::get(&st.db, u.id, id).await? }),
-    ))
 }
 
 async fn delete_dashboard(
@@ -675,10 +678,31 @@ async fn delete_dashboard(
     User(u): User,
     Path(id): Path<i64>,
 ) -> ApiResult {
-    if !dashboards::delete(&st.db, u.id, id).await? {
-        return Err(not_found());
+    match dashboards::delete(&st.db, u.id, id).await? {
+        Ok(true) => Ok(Json(json!({ "ok": true }))),
+        Ok(false) => Err(not_found()),
+        Err(code) => Err(bad(code)),
     }
-    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct NavBody {
+    items: Vec<dashboards::NavItem>,
+}
+
+async fn get_nav(State(st): State<AppState>, User(u): User) -> ApiResult {
+    Ok(Json(
+        json!({ "items": dashboards::nav(&st.db, u.id).await? }),
+    ))
+}
+
+async fn put_nav(State(st): State<AppState>, User(u): User, Json(b): Json<NavBody>) -> ApiResult {
+    match dashboards::set_nav(&st.db, u.id, &b.items).await? {
+        Ok(()) => Ok(Json(
+            json!({ "items": dashboards::nav(&st.db, u.id).await? }),
+        )),
+        Err(code) => Err(bad(code)),
+    }
 }
 
 /// Every metric the user has, with its Browse category and latest value.
